@@ -1,0 +1,1162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    原始 URDF 由 SolidWorks to URDF Exporter 生成。
+    修改：将 visual 中的 STL 网格替换为与 collision 相同的简单几何体。
+-->
+<robot name="jk03_description">
+
+  <!-- ==================== base_link ==================== -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="1.1596E-09 -2.3505E-10 -0.0070506" rpy="0 0 0" />
+      <mass value="26.89" />
+      <inertia ixx="0.10015" ixy="2.9E-07" ixz="0" iyy="0.63353" iyz="0" izz="0.67324" />
+    </inertial>
+    <!-- 视觉：盒子（与碰撞体相同） -->
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.51 0.26 0.15" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <!-- 碰撞体保持不变 -->
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.51 0.26 0.15" />
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ==================== fl_hipx ==================== -->
+  <link name="fl_hipx">
+    <inertial>
+      <origin xyz="-0.014666 0.031806 -5.4997E-06" rpy="0 0 0" />
+      <mass value="1.342" />
+      <inertia ixx="0.00176041" ixy="-0.0001917" ixz="-9.4E-07" iyy="0.00157169" iyz="-1.1E-07" izz="0.00202889" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FL_hip_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- 视觉：圆柱体（与碰撞体相同） -->
+    <!-- <visual>
+      <origin xyz="-0.01 0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    
+    <!-- 碰撞体 -->
+    <collision>
+      <origin xyz="-0.01 0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fl_hipx_joint" type="revolute">
+    <origin xyz="0.325 0.0700000402160006 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="fl_hipx" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.75" upper="0.75" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== fl_hipy ==================== -->
+  <link name="fl_hipy">
+    <inertial>
+      <origin xyz="-0.010314 -0.031203 -0.038509" rpy="0 0 0" />
+      <mass value="2.42" />
+      <inertia ixx="0.00611388" ixy="0.00040991" ixz="-0.00040221" iyy="0.00492669" iyz="0.0014414" izz="0.00243023" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FL_thigh_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <!-- 视觉：圆柱体1（与第一个碰撞体相同） -->
+    <!-- <visual>
+      <origin xyz="0.0 -0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual> -->
+    <!-- 视觉：盒子（与第二个碰撞体相同） -->
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual> -->
+    <!-- 碰撞体保持不变 -->
+    <collision>
+      <origin xyz="0.0 -0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fl_hipy_joint" type="revolute">
+    <origin xyz="-0.0100000000000001 0.1718 0" rpy="0 0 0" />
+    <parent link="fl_hipx" />
+    <child link="fl_hipy" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== fl_knee ==================== -->
+  <link name="fl_knee">
+    <inertial>
+      <origin xyz="-0.0012222 0.0060027 -0.17625" rpy="0 0 0" />
+      <mass value="1.55493991" />
+      <inertia ixx="0.00780986" ixy="6.561E-05" ixz="-0.00043012" iyy="0.00807968" iyz="0.00059248" izz="0.00165088" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FL_calf_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <!-- 视觉：圆柱体1（细长杆） -->
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual> -->
+    <!-- 视觉：圆柱体2（关节球） -->
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual> -->
+    <!-- 碰撞体 -->
+    <collision>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fl_knee_joint" type="revolute">
+    <origin xyz="0 0 -0.200000000000001" rpy="0 0 0" />
+    <parent link="fl_hipy" />
+    <child link="fl_knee" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.50" upper="-0.52" effort="128.00" velocity="100.00" />
+  </joint>
+
+  <!-- ==================== fl_wheel ==================== -->
+  <link name="fl_wheel">
+    <inertial>
+      <origin xyz="-0.00012998 0.001769 -0.0001018" rpy="0 0 0" />
+      <mass value="0.89637866" />
+      <inertia ixx="0.00293855" ixy="8.8E-07" ixz="2.2E-07" iyy="0.0056868" iyz="6.9E-07" izz="0.00293222" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FL_wheel_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- 视觉：圆柱体（轮子） -->
+    <!-- <visual>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <!-- 碰撞体 -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fl_wheel_joint" type="continuous">
+    <origin xyz="-0.00803152995974415 0.0414999999999995 -0.245588595090826" rpy="0 0 0" />
+    <parent link="fl_knee" />
+    <child link="fl_wheel" />
+    <axis xyz="0 1 0" />
+    <limit effort="54.00" velocity="250.00" />
+  </joint>
+
+  <!-- ==================== fr_hipx ==================== -->
+  <link name="fr_hipx">
+    <inertial>
+      <origin xyz="-0.014666 -0.031806 5.5006E-06" rpy="0 0 0" />
+      <mass value="1.342" />
+      <inertia ixx="0.00176041" ixy="0.0001917" ixz="9.4E-07" iyy="0.00157169" iyz="-1.1E-07" izz="0.00202889" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FR_hip_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="-0.01 -0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="-0.01 -0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fr_hipx_joint" type="revolute">
+    <origin xyz="0.325 -0.0700000402160014 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="fr_hipx" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.75" upper="0.75" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== fr_hipy ==================== -->
+  <link name="fr_hipy">
+    <inertial>
+      <origin xyz="-0.010294 0.031205 -0.03849" rpy="0 0 0" />
+      <mass value="2.42" />
+      <inertia ixx="0.00611455" ixy="-0.00041" ixz="-0.00040373" iyy="0.00492887" iyz="-0.0014417" izz="0.0024315" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FR_thigh_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fr_hipy_joint" type="revolute">
+    <origin xyz="-0.0100000000000001 -0.1718 0" rpy="0 0 0" />
+    <parent link="fr_hipx" />
+    <child link="fr_hipy" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== fr_knee ==================== -->
+  <link name="fr_knee">
+    <inertial>
+      <origin xyz="-0.0012572 -0.006004 -0.17624" rpy="0 0 0" />
+      <mass value="1.55493991" />
+      <inertia ixx="0.00781062" ixy="-6.116E-05" ixz="-0.00042801" iyy="0.0080792" iyz="-0.00059314" izz="0.00164959" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FR_calf_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fr_knee_joint" type="revolute">
+    <origin xyz="0 0 -0.2" rpy="0 0 0" />
+    <parent link="fr_hipy" />
+    <child link="fr_knee" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.50" upper="-0.52" effort="128.00" velocity="100.00" />
+  </joint>
+
+  <!-- ==================== fr_wheel ==================== -->
+  <link name="fr_wheel">
+    <inertial>
+      <origin xyz="0.00014372 -0.001769 8.1256E-05" rpy="0 0 0" />
+      <mass value="0.89637866" />
+      <inertia ixx="0.0029333" ixy="9.7E-07" ixz="2.39E-06" iyy="0.0056868" iyz="5.5E-07" izz="0.00293747" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/FR_wheel_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="fr_wheel_joint" type="continuous">
+    <origin xyz="-0.0080315299597451 -0.0415000000000005 -0.245588595090825" rpy="0 0 0" />
+    <parent link="fr_knee" />
+    <child link="fr_wheel" />
+    <axis xyz="0 1 0" />
+    <limit effort="54.00" velocity="250.00" />
+  </joint>
+
+  <!-- ==================== hl_hipx ==================== -->
+  <link name="hl_hipx">
+    <inertial>
+      <origin xyz="0.014666 0.031806 5.5023E-06" rpy="0 0 0" />
+      <mass value="1.342" />
+      <inertia ixx="0.00176041" ixy="0.0001917" ixz="-9.4E-07" iyy="0.00157169" iyz="1.1E-07" izz="0.00202889" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RL_hip_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.01 0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.01 0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hl_hipx_joint" type="revolute">
+    <origin xyz="-0.325 0.0700000402160005 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="hl_hipx" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.75" upper="0.75" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== hl_hipy ==================== -->
+  <link name="hl_hipy">
+    <inertial>
+      <origin xyz="-0.010314 -0.031203 -0.038509" rpy="0 0 0" />
+      <mass value="2.42" />
+      <inertia ixx="0.00611388" ixy="0.00040991" ixz="-0.00040221" iyy="0.00492669" iyz="0.0014414" izz="0.00243023" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RL_thigh_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 -0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 -0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hl_hipy_joint" type="revolute">
+    <origin xyz="0.0099999999999999 0.1718 0" rpy="0 0 0" />
+    <parent link="hl_hipx" />
+    <child link="hl_hipy" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== hl_knee ==================== -->
+  <link name="hl_knee">
+    <inertial>
+      <origin xyz="-0.0012222 0.0060026 -0.17625" rpy="0 0 0" />
+      <mass value="1.55493991" />
+      <inertia ixx="0.00780986" ixy="6.561E-05" ixz="-0.00043012" iyy="0.00807968" iyz="0.00059248" izz="0.00165088" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RL_calf_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hl_knee_joint" type="revolute">
+    <origin xyz="0 0 -0.2" rpy="0 0 0" />
+    <parent link="hl_hipy" />
+    <child link="hl_knee" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.50" upper="-0.52" effort="128.00" velocity="100.00" />
+  </joint>
+
+  <!-- ==================== hl_wheel ==================== -->
+  <link name="hl_wheel">
+    <inertial>
+      <origin xyz="-0.00012743 0.001769 -0.00010497" rpy="0 0 0" />
+      <mass value="0.89637866" />
+      <inertia ixx="0.00293853" ixy="8.7E-07" ixz="3.8E-07" iyy="0.0056868" iyz="7.1E-07" izz="0.00293224" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RL_wheel_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hl_wheel_joint" type="continuous">
+    <origin xyz="-0.00803152995974643 0.0415000000000005 -0.245588595090825" rpy="0 0 0" />
+    <parent link="hl_knee" />
+    <child link="hl_wheel" />
+    <axis xyz="0 1 0" />
+    <limit effort="54.00" velocity="250.00" />
+  </joint>
+
+  <!-- ==================== hr_hipx ==================== -->
+  <link name="hr_hipx">
+    <inertial>
+      <origin xyz="0.014666 -0.031806 -5.5019E-06" rpy="0 0 0" />
+      <mass value="1.342" />
+      <inertia ixx="0.00176041" ixy="-0.0001917" ixz="9.4E-07" iyy="0.00157169" iyz="1.1E-07" izz="0.00202889" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RR_hip_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+
+    <!-- <visual>
+      <origin xyz="0.01 -0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.01 -0.03 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.080" radius="0.040" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hr_hipx_joint" type="revolute">
+    <origin xyz="-0.325 -0.0700000402160015 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="hr_hipx" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.75" upper="0.75" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== hr_hipy ==================== -->
+  <link name="hr_hipy">
+    <inertial>
+      <origin xyz="-0.010276 0.031205 -0.038487" rpy="0 0 0" />
+      <mass value="2.42" />
+      <inertia ixx="0.00611671" ixy="-0.00041133" ixz="-0.00040554" iyy="0.00493073" iyz="-0.00144194" izz="0.00243121" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RR_thigh_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+      <material name="">
+        <color rgba="0.25098 0.25098 0.25098 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 0.05 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.095" radius="0.050" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.085 0.04 0.23" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hr_hipy_joint" type="revolute">
+    <origin xyz="0.0099999999999999 -0.1718 0" rpy="0 0 0" />
+    <parent link="hr_hipx" />
+    <child link="hr_hipy" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="96.00" velocity="140.00" />
+  </joint>
+
+  <!-- ==================== hr_knee ==================== -->
+  <link name="hr_knee">
+    <inertial>
+      <origin xyz="-0.0012572 -0.006004 -0.17624" rpy="0 0 0" />
+      <mass value="1.55493991" />
+      <inertia ixx="0.00781062" ixy="-6.116E-05" ixz="-0.00042801" iyy="0.0080792" iyz="-0.00059314" izz="0.00164959" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RR_calf_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0.0 0.0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.018" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0 0.0 -0.25" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.050" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hr_knee_joint" type="revolute">
+    <origin xyz="0.00199279545552766 0 -0.200169606227562" rpy="0 0 0" />
+    <parent link="hr_hipy" />
+    <child link="hr_knee" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.50" upper="-0.52" effort="128.00" velocity="100.00" />
+  </joint>
+
+  <!-- ==================== hr_wheel ==================== -->
+  <link name="hr_wheel">
+    <inertial>
+      <origin xyz="-2.0213E-05 -0.001769 0.00016388" rpy="0 0 0" />
+      <mass value="0.89637866" />
+      <inertia ixx="0.00293518" ixy="-1.4E-07" ixz="-3.16E-06" iyy="0.0056868" iyz="1.11E-06" izz="0.00293559" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/RR_wheel_joint.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- <visual>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual> -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632 0 0" />
+      <geometry>
+        <cylinder length="0.040" radius="0.105" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="hr_wheel_joint" type="continuous">
+    <origin xyz="-0.00803152995974732 -0.0414999999999996 -0.245588595090825" rpy="0 0 0" />
+    <parent link="hr_knee" />
+    <child link="hr_wheel" />
+    <axis xyz="0 1 0" />
+    <limit effort="54.00" velocity="250.00" />
+  </joint>
+
+  <!-- ==================== imu_link ==================== -->
+  <link name="imu_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <origin xyz="-0.02557 0 0.04232" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="imu_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <!-- ==================== Gazebo 轮子摩擦参数 ====================
+  <gazebo reference="fl_wheel">
+    <material>Gazebo/Rubber</material>
+    <mu1 value="1.5"/>
+    <mu2 value="1.5"/>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <minDepth value="0.001"/>
+    <maxVel value="1.0"/>
+    <slipCompliance value="0.05"/>
+    <fdir1 value="0 0 1"/>
+  </gazebo>
+
+  <gazebo reference="fr_wheel">
+    <material>Gazebo/Rubber</material>
+    <mu1 value="1.5"/>
+    <mu2 value="1.5"/>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <minDepth value="0.001"/>
+    <maxVel value="1.0"/>
+    <slipCompliance value="0.05"/>
+    <fdir1 value="0 0 1"/>
+  </gazebo>
+
+  <gazebo reference="hl_wheel">
+    <material>Gazebo/Rubber</material>
+    <mu1 value="1.5"/>
+    <mu2 value="1.5"/>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <minDepth value="0.001"/>
+    <maxVel value="1.0"/>
+    <slipCompliance value="0.05"/>
+    <fdir1 value="0 0 1"/>
+  </gazebo>
+
+  <gazebo reference="hr_wheel">
+    <material>Gazebo/Rubber</material>
+    <mu1 value="1.5"/>
+    <mu2 value="1.5"/>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <minDepth value="0.001"/>
+    <maxVel value="1.0"/>
+    <slipCompliance value="0.05"/>
+    <fdir1 value="0 0 1"/>
+  </gazebo> -->
+
+  <!-- ==================== 传动装置 (Transmissions) ==================== -->
+  <!-- Front Left -->
+  <transmission name="fl_hipx_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fl_hipx_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fl_hipx_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fl_hipy_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fl_hipy_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fl_hipy_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fl_knee_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fl_knee_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fl_knee_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fl_wheel_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fl_wheel_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fl_wheel_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <!-- Front Right -->
+  <transmission name="fr_hipx_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fr_hipx_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fr_hipx_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fr_hipy_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fr_hipy_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fr_hipy_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fr_knee_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fr_knee_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fr_knee_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="fr_wheel_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="fr_wheel_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="fr_wheel_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <!-- Hind Left -->
+  <transmission name="hl_hipx_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hl_hipx_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hl_hipx_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hl_hipy_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hl_hipy_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hl_hipy_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hl_knee_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hl_knee_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hl_knee_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hl_wheel_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hl_wheel_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hl_wheel_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <!-- Hind Right -->
+  <transmission name="hr_hipx_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hr_hipx_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hr_hipx_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hr_hipy_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hr_hipy_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hr_hipy_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hr_knee_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hr_knee_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hr_knee_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="hr_wheel_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="hr_wheel_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="hr_wheel_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+</robot>
