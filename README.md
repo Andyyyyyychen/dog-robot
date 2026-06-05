@@ -16,3 +16,7 @@ R 重置姿态    H 帮助        Esc 退出
 ```
 
 详细说明见 `rl_sar-main/docs/manual_mujoco_go2_cn.md`。
+# zhexi-chen
+deeplearning for dog robot
+made by Andy Chen
+The data of dog robot is from yuanjie ruizhi company
