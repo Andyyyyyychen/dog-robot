@@ -14,13 +14,20 @@ RL_Sim::RL_Sim(int argc, char **argv)
 
     if (argc < 3)
     {
-        std::cout << LOGGER::ERROR << "Usage: " << argv[0] << " robot_name scene_name" << std::endl;
+        std::cout << LOGGER::ERROR << "Usage: " << argv[0] << " robot_name scene_name [--manual]" << std::endl;
         throw std::runtime_error("Invalid arguments");
     }
     else
     {
         this->robot_name = argv[1];
         this->scene_name = argv[2];
+    }
+    for (int i = 3; i < argc; ++i)
+    {
+        if (std::string(argv[i]) == "--manual")
+        {
+            this->manual_mode = true;
+        }
     }
 
     this->ang_vel_axis = "body";
@@ -105,9 +112,12 @@ RL_Sim::RL_Sim(int argc, char **argv)
 
     // loop
     this->loop_control = std::make_shared<LoopFunc>("loop_control", this->params.Get<float>("dt"), std::bind(&RL_Sim::RobotControl, this));
-    this->loop_rl = std::make_shared<LoopFunc>("loop_rl", this->params.Get<float>("dt") * this->params.Get<int>("decimation"), std::bind(&RL_Sim::RunModel, this));
     this->loop_control->start();
-    this->loop_rl->start();
+    if (!this->manual_mode)
+    {
+        this->loop_rl = std::make_shared<LoopFunc>("loop_rl", this->params.Get<float>("dt") * this->params.Get<int>("decimation"), std::bind(&RL_Sim::RunModel, this));
+        this->loop_rl->start();
+    }
 
     // keyboard
     this->loop_keyboard = std::make_shared<LoopFunc>("loop_keyboard", 0.05, std::bind(&RL_Sim::KeyboardInterface, this));
@@ -130,7 +140,11 @@ RL_Sim::RL_Sim(int argc, char **argv)
     this->CSVInit(this->robot_name);
 #endif
 
-    std::cout << LOGGER::INFO << "RL_Sim start" << std::endl;
+    std::cout << LOGGER::INFO << "RL_Sim start" << (this->manual_mode ? " [manual gait mode]" : "") << std::endl;
+    if (this->manual_mode)
+    {
+        std::cout << LOGGER::NOTE << "Manual mode controls: 1 trot, 0 stand, W/S/A/D/Q/E command, Space clear, P passive, R reset, Enter pause." << std::endl;
+    }
 
     // start simulation UI loop (blocking call)
     sim->RenderLoop();
@@ -144,7 +158,10 @@ RL_Sim::~RL_Sim()
     this->loop_keyboard->shutdown();
     this->loop_joystick->shutdown();
     this->loop_control->shutdown();
-    this->loop_rl->shutdown();
+    if (this->loop_rl)
+    {
+        this->loop_rl->shutdown();
+    }
 #ifdef PLOT
     this->loop_plot->shutdown();
 #endif
@@ -194,7 +211,14 @@ void RL_Sim::RobotControl()
 
     this->GetState(&this->robot_state);
 
-    this->StateController(&this->robot_state, &this->robot_command);
+    if (this->manual_mode)
+    {
+        this->ManualControl(&this->robot_state, &this->robot_command);
+    }
+    else
+    {
+        this->StateController(&this->robot_state, &this->robot_command);
+    }
 
     if (this->control.current_keyboard == Input::Keyboard::R || this->control.current_gamepad == Input::Gamepad::RB_Y)
     {
@@ -222,6 +246,158 @@ void RL_Sim::RobotControl()
     this->control.ClearInput();
 
     this->SetCommand(&this->robot_command);
+}
+
+void RL_Sim::UpdateManualCommandFromInput()
+{
+    if (this->control.current_keyboard == Input::Keyboard::W)
+    {
+        this->control.x = std::clamp(this->control.x + 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::S)
+    {
+        this->control.x = std::clamp(this->control.x - 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::A)
+    {
+        this->control.y = std::clamp(this->control.y + 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::D)
+    {
+        this->control.y = std::clamp(this->control.y - 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::Q)
+    {
+        this->control.yaw = std::clamp(this->control.yaw + 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::E)
+    {
+        this->control.yaw = std::clamp(this->control.yaw - 0.1f, -1.0f, 1.0f);
+        this->manual_motion_enabled = true;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::Space)
+    {
+        this->control.x = 0.0f;
+        this->control.y = 0.0f;
+        this->control.yaw = 0.0f;
+        this->manual_motion_enabled = false;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::Num1)
+    {
+        if (std::abs(this->control.x) + std::abs(this->control.y) + std::abs(this->control.yaw) < 0.001f)
+        {
+            this->control.x = 0.35f;
+        }
+        this->manual_motion_enabled = true;
+        this->manual_passive = false;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::Num0)
+    {
+        this->control.x = 0.0f;
+        this->control.y = 0.0f;
+        this->control.yaw = 0.0f;
+        this->manual_motion_enabled = false;
+        this->manual_passive = false;
+    }
+    if (this->control.current_keyboard == Input::Keyboard::P || this->control.current_gamepad == Input::Gamepad::LB_X)
+    {
+        this->manual_passive = !this->manual_passive;
+        std::cout << std::endl << LOGGER::INFO << "Manual passive: " << (this->manual_passive ? "ON" : "OFF") << std::endl;
+    }
+}
+
+std::vector<float> RL_Sim::ManualGaitTarget() const
+{
+    std::vector<float> target = this->params.Get<std::vector<float>>("default_dof_pos");
+    const float command_mag = std::min(1.0f, std::abs(this->control.x) + std::abs(this->control.y) + std::abs(this->control.yaw));
+
+    if (!this->manual_motion_enabled || command_mag < 0.001f)
+    {
+        return target;
+    }
+
+    constexpr float pi = 3.14159265358979323846f;
+    const float time_s = static_cast<float>(this->motiontime) * this->params.Get<float>("dt");
+    const float phase_base = 2.0f * pi * (1.15f + 0.65f * command_mag) * time_s;
+    const std::array<const char*, 4> legs = {"FR", "FL", "RR", "RL"};
+
+    for (int leg = 0; leg < 4; ++leg)
+    {
+        const std::string leg_name = legs[leg];
+        const float offset = (leg_name == "FR" || leg_name == "RL") ? 0.0f : pi;
+        const float phase = phase_base + offset;
+        const float sin_phase = std::sin(phase);
+        const float cos_phase = std::cos(phase);
+        const float swing = std::max(0.0f, sin_phase);
+        const float side = leg_name[1] == 'R' ? -1.0f : 1.0f;
+        const float front = leg_name[0] == 'F' ? 1.0f : -1.0f;
+        const int i = leg * 3;
+
+        const float stride = 0.22f * this->control.x * cos_phase;
+        const float lift = 0.30f * swing * std::max(0.25f, command_mag);
+        const float lateral = 0.10f * this->control.y * side;
+        const float yaw = 0.10f * this->control.yaw * front * side;
+
+        target[i + 0] += lateral + yaw + 0.025f * sin_phase * command_mag;
+        target[i + 1] += stride + lift;
+        target[i + 2] += -0.55f * lift - 0.30f * stride;
+    }
+
+    return target;
+}
+
+void RL_Sim::ManualControl(const RobotState<float> *state, RobotCommand<float> *command)
+{
+    this->motiontime++;
+    this->UpdateManualCommandFromInput();
+    if (std::abs(this->control.x) + std::abs(this->control.y) + std::abs(this->control.yaw) > 0.001f)
+    {
+        this->manual_motion_enabled = true;
+    }
+
+    const int num_dofs = this->params.Get<int>("num_of_dofs");
+    if (this->manual_passive)
+    {
+        for (int i = 0; i < num_dofs; ++i)
+        {
+            command->motor_command.q[i] = state->motor_state.q[i];
+            command->motor_command.dq[i] = 0.0f;
+            command->motor_command.kp[i] = 0.0f;
+            command->motor_command.kd[i] = 8.0f;
+            command->motor_command.tau[i] = 0.0f;
+        }
+        return;
+    }
+
+    std::vector<float> target = this->ManualGaitTarget();
+    const auto kp = this->params.Get<std::vector<float>>("fixed_kp");
+    const auto kd = this->params.Get<std::vector<float>>("fixed_kd");
+
+    for (int i = 0; i < num_dofs; ++i)
+    {
+        command->motor_command.q[i] = target[i];
+        command->motor_command.dq[i] = 0.0f;
+        command->motor_command.kp[i] = kp[i];
+        command->motor_command.kd[i] = kd[i];
+        command->motor_command.tau[i] = 0.0f;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - this->last_manual_status > std::chrono::milliseconds(250))
+    {
+        std::cout << "\r\033[K" << std::flush
+                  << LOGGER::INFO << "Manual "
+                  << (this->manual_motion_enabled ? "trot" : "stand")
+                  << " x:" << this->control.x
+                  << " y:" << this->control.y
+                  << " yaw:" << this->control.yaw << std::flush;
+        this->last_manual_status = now;
+    }
 }
 
 void RL_Sim::SetupSysJoystick(const std::string& device, int bits)

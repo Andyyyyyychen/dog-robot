@@ -198,6 +198,21 @@ git clone https://github.com/osrf/gazebo_models.git ~/.gazebo/models
 # Example: ./cmake_build/bin/rl_sim_mujoco g1 scene_29dof
 ```
 
+如果你只是想在本地 Linux 上先看 Go2 机器狗的 3D 状态，并且暂时不训练、不加载 `.pt/.onnx` 策略，可以直接使用新增的手动 MuJoCo 入口：
+
+```bash
+python3 -m pip install mujoco
+python3 rl_sar-main/scripts/manual_mujoco_go2.py
+```
+
+也可以在补齐 `rl_sar_zoo` 的 MJCF 场景后用原 C++ 入口的手动模式：
+
+```bash
+./cmake_build/bin/rl_sim_mujoco go2 scene --manual
+```
+
+更多按键和参数见 [Go2 本地 MuJoCo 手动仿真](docs/manual_mujoco_go2_cn.md)。
+
 #### Docker
 
 Docker支持仿真和部署。详见 [docker/README.md](docker/README.md)。

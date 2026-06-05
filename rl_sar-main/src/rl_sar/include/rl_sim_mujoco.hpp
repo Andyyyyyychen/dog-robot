@@ -19,6 +19,9 @@
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <array>
+#include <chrono>
+#include <cmath>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <filesystem>
@@ -66,6 +69,9 @@ private:
     void SetCommand(const RobotCommand<float> *command) override;
     void RunModel();
     void RobotControl();
+    void ManualControl(const RobotState<float> *state, RobotCommand<float> *command);
+    std::vector<float> ManualGaitTarget() const;
+    void UpdateManualCommandFromInput();
 
     // loop
     std::shared_ptr<LoopFunc> loop_keyboard;
@@ -84,6 +90,10 @@ private:
     mjData *mj_data;
     mjModel *mj_model;
     std::string scene_name;
+    bool manual_mode = false;
+    bool manual_motion_enabled = false;
+    bool manual_passive = false;
+    std::chrono::steady_clock::time_point last_manual_status = std::chrono::steady_clock::now();
 
     // joystick
     std::unique_ptr<Joystick> sys_js;
