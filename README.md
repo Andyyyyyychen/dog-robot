@@ -15,6 +15,12 @@ python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
 ```
 
+如果移动时想固定看整个楼梯场景：
+
+```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --camera fixed
+```
+
 常用按键：
 
 ```text

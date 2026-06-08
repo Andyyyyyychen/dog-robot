@@ -58,6 +58,9 @@ python3 rl_sar-main/scripts/manual_mujoco_jk03.py --stand
 # 进入场景后自动慢速前进
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --speed 0.2
 
+# 固定看整个楼梯场景，不跟随机器人
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --camera fixed
+
 # 不开 viewer，跑 5 秒用于检查 MuJoCo 是否能加载模型
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --headless --duration 5
 

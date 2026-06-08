@@ -213,6 +213,12 @@ python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
 ```
 
+如果移动时想固定看整个楼梯场景：
+
+```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --camera fixed
+```
+
 当前仓库没有 `rl_sar_zoo` 下的 JK03 MJCF 场景，所以优先使用上面的 Python 入口。后续如果补齐 JK03 场景并完成 MuJoCo 编译，可以再使用原 C++ 入口：
 
 ```bash

@@ -151,6 +151,7 @@ HIPX_ACTION_SCALE = 0.125
 LEG_ACTION_SCALE = 0.25
 WHEEL_ACTION_SCALE = 5.0
 SCENE_CHOICES = ("empty", "ground", "low-stairs", "stairs-world")
+CAMERA_CHOICES = ("follow", "fixed")
 
 LOW_STAIR_START_X = 1.2
 LOW_STAIR_STEP_DEPTH = 0.35
@@ -409,6 +410,30 @@ def terrain_height_at(scene: str, x: float, y: float) -> float:
             count=GAZEBO_STAIR_COUNT,
         )
     return 0.0
+
+
+def scene_lookat(scene: str) -> tuple[float, float, float]:
+    if scene == "stairs-world":
+        return 2.9, 0.0, 0.65
+    if scene == "low-stairs":
+        return 2.0, 0.0, 0.35
+    return 0.8, 0.0, 0.35
+
+
+def update_viewer_camera(viewer, data, free_qpos_addr: int | None, scene: str, mode: str) -> None:
+    scene_x, scene_y, scene_z = scene_lookat(scene)
+    if mode == "fixed" or free_qpos_addr is None:
+        viewer.cam.lookat[:] = [scene_x, scene_y, scene_z]
+        return
+
+    robot_x = float(data.qpos[free_qpos_addr])
+    robot_y = float(data.qpos[free_qpos_addr + 1])
+    robot_z = float(data.qpos[free_qpos_addr + 2])
+    viewer.cam.lookat[:] = [
+        0.65 * robot_x + 0.35 * scene_x,
+        0.65 * robot_y + 0.35 * scene_y,
+        max(0.25, 0.65 * robot_z + 0.35 * scene_z),
+    ]
 
 
 def prepare_urdf(
@@ -758,6 +783,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-y", type=float, default=0.0, help="Initial base y position in the scene.")
     parser.add_argument("--friction", type=float, default=1.5, help="Minimum sliding friction for all MuJoCo geoms.")
     parser.add_argument(
+        "--camera",
+        choices=CAMERA_CHOICES,
+        default="follow",
+        help="Viewer camera behavior.",
+    )
+    parser.add_argument(
         "--collision-only",
         action="store_true",
         help="Ignore visual meshes and show collision geometry only.",
@@ -826,14 +857,15 @@ def main() -> int:
         viewer_module = importlib.import_module("mujoco.viewer")
 
         with viewer_module.launch_passive(model, data, key_callback=controller.on_key) as viewer:
-            viewer.cam.distance = 2.4
+            viewer.cam.distance = 4.0 if args.scene == "stairs-world" else 2.8
             viewer.cam.azimuth = 120
             viewer.cam.elevation = -18
-            viewer.cam.lookat[:] = [1.0, 0.0, 0.35]
+            update_viewer_camera(viewer, data, controller.free_qpos_addr, args.scene, args.camera)
             while viewer.is_running() and not controller.exit_requested:
                 step_started = time.time()
                 controller.step()
                 mujoco.mj_step(model, data)
+                update_viewer_camera(viewer, data, controller.free_qpos_addr, args.scene, args.camera)
                 viewer.sync()
                 sleep_time = model.opt.timestep - (time.time() - step_started)
                 if sleep_time > 0:
