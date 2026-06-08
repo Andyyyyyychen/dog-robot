@@ -44,22 +44,22 @@ Esc    退出 viewer
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py
 
 # 平地
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground --collision-only --camera fixed
 
 # 简单低台阶，更适合先检查轮足移动
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs --collision-only --camera fixed
 
 # 明确指定仓库里的 stairs.world 场景
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --collision-only --camera fixed
 
 # 只站立打开模型
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --stand
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground --collision-only --camera fixed --stand
 
 # 进入场景后自动慢速前进
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --speed 0.2
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs --collision-only --camera fixed --speed 0.1
 
 # 固定看整个楼梯场景，不跟随机器人
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --camera fixed
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --collision-only --camera fixed
 
 # 不开 viewer，跑 5 秒用于检查 MuJoCo 是否能加载模型
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --headless --duration 5
@@ -81,3 +81,35 @@ stairs-world  读取仓库里的 Gazebo stairs.world，默认值
 ```
 
 默认启用了软平衡辅助，避免未训练控制器马上翻倒。它会根据台阶高度轻微调整目标机身高度，但它不是训练出来的策略，也不适合实机；高楼梯能否稳定通过仍然取决于后续策略和控制效果。狗之前会一直动，是因为旧版本默认给了前进速度；现在默认速度是 0，只有按 `1`、`W/S`，或显式传 `--speed` 才会移动。
+
+## 常见异常和原因
+
+如果看到机器人不停转、漂移、乱飘，通常不是 MuJoCo 坏了，而是因为当前入口只是手写检查控制器，不是训练好的强化学习策略。它只用默认站姿、简单 PD、轮速指令和软平衡辅助来做本地检查；它还没有学会起立、稳定走路、过楼梯或跌倒恢复。
+
+如果看到模型或背景很难看，这是因为 JK03 的部分 STL 视觉 mesh 在 MuJoCo 中可能加载失败，脚本会回退到 `--collision-only` 的简化碰撞几何。这个模式适合检查关节、接触和场景，不代表最终展示效果。
+
+如果看到场景像“消失”，优先判断是相机视角问题，而不是场景被删除。推荐使用固定相机：
+
+```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --collision-only --camera fixed
+```
+
+如果按 `0` 或 `1` 后画面显示异常，可能是 MuJoCo viewer 自己也把数字键当作显示组快捷键。此时可以先用 `W/S` 控制速度，或者重新运行固定相机命令。当前脚本中的 `1` 表示开始轮驱，`0` 表示停止站立。
+
+建议按下面顺序检查，不要一开始就上高楼梯：
+
+```bash
+# 1. 平地站立，最稳
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground --collision-only --camera fixed --stand
+
+# 2. 平地慢速移动
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground --collision-only --camera fixed --speed 0.1
+
+# 3. 低台阶慢速移动
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs --collision-only --camera fixed --speed 0.1
+
+# 4. 仓库 stairs.world 场景，只建议用于场景加载和后续策略验证
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --collision-only --camera fixed
+```
+
+真正想让 JK03 稳定走、转向、过楼梯，需要在云服务器上训练 policy，然后再把训练好的 `.pt` 或 `.onnx` 策略拿回 MuJoCo 做验证。这个手动脚本只是模型、场景和接触检查入口。

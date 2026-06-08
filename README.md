@@ -18,7 +18,13 @@ python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
 如果移动时想固定看整个楼梯场景：
 
 ```bash
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --camera fixed
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --collision-only --camera fixed
+```
+
+如果仿真出现乱转、漂移、场景像消失或画面很丑，优先用这个稳定检查命令：
+
+```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground --collision-only --camera fixed --stand
 ```
 
 常用按键：
