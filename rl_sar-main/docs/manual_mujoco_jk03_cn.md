@@ -1,0 +1,54 @@
+# JK03 本地 MuJoCo 手动仿真
+
+这个入口用于“不训练、不加载策略模型”地在本机打开 JK03 轮足机器人的 3D MuJoCo 仿真。它读取现有 `jk03` URDF，并使用 `robot_lab` 中 JK03 的关节顺序、初始高度、默认关节角、PD 增益、轮关节阻尼和力矩限制。
+
+脚本只会生成临时 MuJoCo URDF，不会修改 `jk03` 源 URDF 或任何 `jk03` 配置参数。
+
+## 推荐启动方式
+
+在仓库根目录执行：
+
+```bash
+python3 -m pip install mujoco
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py
+```
+
+默认会读取：
+
+```text
+robot_lab-main/source/robot_lab/data/Robots/jk03/jk03_description/urdf/jk03.urdf
+```
+
+并自动修正 mesh 路径、删除临时副本里的 ROS transmission 块、添加 floating base，然后打开 MuJoCo 3D viewer。
+
+## 键盘控制
+
+```text
+1      开始轮驱
+0      站立
+W/S    前进/后退轮速指令
+A/D    左右姿态和轮速偏置
+Q/E    偏航偏置
+Space  清空指令并站立
+R      重置姿态
+H      显示帮助
+Esc    退出 viewer
+```
+
+## 常用参数
+
+```bash
+# 只站立打开模型
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --stand
+
+# 不开 viewer，跑 5 秒用于检查 MuJoCo 是否能加载模型
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --headless --duration 5
+
+# 关闭软平衡辅助，查看更接近裸物理的效果
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --no-assist
+
+# 如果 MuJoCo 不能加载视觉 mesh，则只显示碰撞几何
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --collision-only
+```
+
+默认启用了软平衡辅助，避免未训练控制器马上翻倒。它不是训练出来的策略，也不适合实机，只是本地调模型和检查 MuJoCo 加载链路的辅助控制。
