@@ -7,11 +7,12 @@ python3 -m pip install mujoco
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py
 ```
 
-默认会把 JK03 放在平地上。切换到低台阶或仓库里 Gazebo 楼梯尺寸的场景：
+默认会读取仓库里的 `rl_sar-main/src/rl_sar/worlds/stairs.world`，把 JK03 放到这个楼梯场景前方。启动后默认站立不动，按 `1` 或 `W/S` 后才开始轮驱。也可以切换到平地或低台阶：
 
 ```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --speed 0.2
 ```
 
 常用按键：

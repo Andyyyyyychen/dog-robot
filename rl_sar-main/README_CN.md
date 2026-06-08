@@ -205,11 +205,12 @@ python3 -m pip install mujoco
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py
 ```
 
-默认场景是平地。也可以切换到低台阶，或按仓库中的 `rl_sar-main/src/rl_sar/worlds/stairs.world` 尺寸生成楼梯：
+默认会读取仓库中的 `rl_sar-main/src/rl_sar/worlds/stairs.world`，把 JK03 放在楼梯场景前方，并且启动后默认站立不动。也可以切换到平地或低台阶：
 
 ```bash
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py
+python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene ground
 python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene low-stairs
-python3 rl_sar-main/scripts/manual_mujoco_jk03.py --scene stairs-world --speed 0.2
 ```
 
 当前仓库没有 `rl_sar_zoo` 下的 JK03 MJCF 场景，所以优先使用上面的 Python 入口。后续如果补齐 JK03 场景并完成 MuJoCo 编译，可以再使用原 C++ 入口：

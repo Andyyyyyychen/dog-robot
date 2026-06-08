@@ -17,6 +17,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import NamedTuple
 
 
 np = None
@@ -26,6 +27,7 @@ DEFAULT_URDF = (
     REPO_ROOT
     / "robot_lab-main/source/robot_lab/data/Robots/jk03/jk03_description/urdf/jk03.urdf"
 )
+DEFAULT_WORLD = REPO_ROOT / "rl_sar-main/src/rl_sar/worlds/stairs.world"
 
 # From robot_lab .../config/wheeled/jk03/rough_env_cfg.py.
 LEG_JOINT_NAMES = [
@@ -164,6 +166,13 @@ GAZEBO_STAIR_COUNT = 10
 GAZEBO_STAIR_WIDTH = 10.0
 
 
+class BoxGeom(NamedTuple):
+    name: str
+    xyz: tuple[float, float, float]
+    rpy: tuple[float, float, float]
+    size: tuple[float, float, float]
+
+
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
@@ -223,11 +232,105 @@ def resolve_mesh_filename(source_urdf: Path, filename: str) -> str:
     return str((source_urdf.parent / path).resolve())
 
 
+def parse_sdf_pose(element: ET.Element | None) -> tuple[float, float, float, float, float, float]:
+    if element is None or not element.text:
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    values = [float(value) for value in element.text.split()]
+    values += [0.0] * (6 - len(values))
+    return tuple(values[:6])
+
+
+def combine_sdf_pose(
+    parent: tuple[float, float, float, float, float, float],
+    child: tuple[float, float, float, float, float, float],
+) -> tuple[float, float, float, float, float, float]:
+    px, py, pz, proll, ppitch, pyaw = parent
+    cx, cy, cz, croll, cpitch, cyaw = child
+    cos_yaw = math.cos(pyaw)
+    sin_yaw = math.sin(pyaw)
+    return (
+        px + cos_yaw * cx - sin_yaw * cy,
+        py + sin_yaw * cx + cos_yaw * cy,
+        pz + cz,
+        proll + croll,
+        ppitch + cpitch,
+        pyaw + cyaw,
+    )
+
+
+def parse_sdf_box_size(size_element: ET.Element | None) -> tuple[float, float, float] | None:
+    if size_element is None or not size_element.text:
+        return None
+    values = [float(value) for value in size_element.text.split()]
+    if len(values) != 3:
+        return None
+    return values[0], values[1], values[2]
+
+
+def load_world_boxes(world_path: Path) -> list[BoxGeom]:
+    tree = ET.parse(world_path)
+    root = tree.getroot()
+    boxes: list[BoxGeom] = []
+
+    include_uris = [uri.text.strip() for uri in root.findall(".//include/uri") if uri.text]
+    if "model://ground_plane" in include_uris:
+        boxes.append(BoxGeom("world_ground_plane", (0.0, 0.0, -0.025), (0.0, 0.0, 0.0), (30.0, 30.0, 0.05)))
+
+    for model in root.findall(".//model"):
+        model_pose = parse_sdf_pose(model.find("pose"))
+        for link in model.findall("link"):
+            link_name = link.attrib.get("name", "link")
+            link_pose = combine_sdf_pose(model_pose, parse_sdf_pose(link.find("pose")))
+            geometry_sources = link.findall("collision")
+            if not geometry_sources:
+                geometry_sources = link.findall("visual")
+            for index, source in enumerate(geometry_sources):
+                size = parse_sdf_box_size(source.find("geometry/box/size"))
+                if size is None:
+                    continue
+                pose = combine_sdf_pose(link_pose, parse_sdf_pose(source.find("pose")))
+                boxes.append(
+                    BoxGeom(
+                        f"world_{link_name}_{index}",
+                        (pose[0], pose[1], pose[2]),
+                        (pose[3], pose[4], pose[5]),
+                        size,
+                    )
+                )
+    return boxes
+
+
+def scene_boxes(scene: str) -> list[BoxGeom]:
+    if scene == "empty":
+        return []
+    if scene == "stairs-world":
+        return load_world_boxes(DEFAULT_WORLD)
+
+    boxes = [BoxGeom("terrain_ground", (0.0, 0.0, -0.025), (0.0, 0.0, 0.0), (30.0, 30.0, 0.05))]
+    if scene == "ground":
+        return boxes
+    if scene == "low-stairs":
+        for step_index in range(LOW_STAIR_COUNT):
+            height = LOW_STAIR_STEP_HEIGHT * (step_index + 1)
+            center_x = LOW_STAIR_START_X + LOW_STAIR_STEP_DEPTH * step_index
+            boxes.append(
+                BoxGeom(
+                    f"terrain_low_stair_{step_index}",
+                    (center_x, 0.0, height / 2.0),
+                    (0.0, 0.0, 0.0),
+                    (LOW_STAIR_STEP_DEPTH, LOW_STAIR_WIDTH, height),
+                )
+            )
+        return boxes
+    raise ValueError(f"Unknown scene: {scene}")
+
+
 def add_box_link(
     root: ET.Element,
     *,
     name: str,
     xyz: tuple[float, float, float],
+    rpy: tuple[float, float, float] = (0.0, 0.0, 0.0),
     size: tuple[float, float, float],
 ) -> None:
     link = ET.SubElement(root, "link", {"name": name})
@@ -238,7 +341,11 @@ def add_box_link(
         ET.SubElement(geometry, "box", {"size": f"{size[0]} {size[1]} {size[2]}"})
 
     joint = ET.SubElement(root, "joint", {"name": f"{name}_fixed", "type": "fixed"})
-    ET.SubElement(joint, "origin", {"xyz": f"{xyz[0]} {xyz[1]} {xyz[2]}", "rpy": "0 0 0"})
+    ET.SubElement(
+        joint,
+        "origin",
+        {"xyz": f"{xyz[0]} {xyz[1]} {xyz[2]}", "rpy": f"{rpy[0]} {rpy[1]} {rpy[2]}"},
+    )
     ET.SubElement(joint, "parent", {"link": "world"})
     ET.SubElement(joint, "child", {"link": name})
 
@@ -265,41 +372,8 @@ def add_stairs(
 
 
 def add_scene_geometry(root: ET.Element, scene: str) -> None:
-    if scene == "empty":
-        return
-
-    add_box_link(
-        root,
-        name="terrain_ground",
-        xyz=(0.0, 0.0, -0.025),
-        size=(30.0, 30.0, 0.05),
-    )
-
-    if scene == "ground":
-        return
-    if scene == "low-stairs":
-        add_stairs(
-            root,
-            name_prefix="terrain_low_stair",
-            start_x=LOW_STAIR_START_X,
-            step_depth=LOW_STAIR_STEP_DEPTH,
-            step_height=LOW_STAIR_STEP_HEIGHT,
-            count=LOW_STAIR_COUNT,
-            width=LOW_STAIR_WIDTH,
-        )
-        return
-    if scene == "stairs-world":
-        add_stairs(
-            root,
-            name_prefix="terrain_world_stair",
-            start_x=GAZEBO_STAIR_START_X,
-            step_depth=GAZEBO_STAIR_STEP_DEPTH,
-            step_height=GAZEBO_STAIR_STEP_HEIGHT,
-            count=GAZEBO_STAIR_COUNT,
-            width=GAZEBO_STAIR_WIDTH,
-        )
-        return
-    raise ValueError(f"Unknown scene: {scene}")
+    for box in scene_boxes(scene):
+        add_box_link(root, name=box.name, xyz=box.xyz, rpy=box.rpy, size=box.size)
 
 
 def stair_height_at(
@@ -393,6 +467,40 @@ def prepare_urdf(
     output_path = output_dir / f"jk03_manual_mujoco_{suffix}.urdf"
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
     return output_path
+
+
+def add_scene_to_spec(spec, scene: str, friction: float) -> None:
+    for box in scene_boxes(scene):
+        spec.worldbody.add_geom(
+            name=box.name,
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=box.xyz,
+            euler=box.rpy,
+            size=[dimension / 2.0 for dimension in box.size],
+            friction=[friction, 0.02, 0.001],
+            rgba=[0.55, 0.56, 0.58, 1.0],
+        )
+
+
+def load_mujoco_model(
+    source_urdf: Path,
+    output_dir: Path,
+    floating_base_height: float,
+    *,
+    keep_visuals: bool,
+    scene: str,
+    friction: float,
+):
+    prepared_urdf = prepare_urdf(
+        source_urdf,
+        output_dir,
+        floating_base_height,
+        keep_visuals=keep_visuals,
+        scene="empty",
+    )
+    spec = mujoco.MjSpec.from_file(str(prepared_urdf))
+    add_scene_to_spec(spec, scene, friction)
+    return spec.compile()
 
 
 class ManualJK03Controller:
@@ -628,7 +736,7 @@ def print_help() -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--urdf", type=Path, default=DEFAULT_URDF, help="Path to the JK03 URDF.")
-    parser.add_argument("--speed", type=float, default=0.35, help="Initial forward command in [-1, 1].")
+    parser.add_argument("--speed", type=float, default=0.0, help="Initial forward command in [-1, 1].")
     parser.add_argument("--turn", type=float, default=0.0, help="Initial yaw command in [-1, 1].")
     parser.add_argument(
         "--height",
@@ -643,7 +751,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scene",
         choices=SCENE_CHOICES,
-        default="ground",
+        default="stairs-world",
         help="Temporary MuJoCo scene geometry to add around the JK03 robot.",
     )
     parser.add_argument("--start-x", type=float, default=0.0, help="Initial base x position in the scene.")
@@ -665,9 +773,15 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="dog_robot_jk03_mujoco_") as tmp:
         tmp_dir = Path(tmp)
         keep_visuals = not args.collision_only
-        prepared_urdf = prepare_urdf(args.urdf, tmp_dir, args.height, keep_visuals=keep_visuals, scene=args.scene)
         try:
-            model = mujoco.MjModel.from_xml_path(str(prepared_urdf))
+            model = load_mujoco_model(
+                args.urdf,
+                tmp_dir,
+                args.height,
+                keep_visuals=keep_visuals,
+                scene=args.scene,
+                friction=args.friction,
+            )
         except Exception as exc:
             if args.collision_only:
                 raise
@@ -676,8 +790,14 @@ def main() -> int:
                 f"Original MuJoCo error: {exc}",
                 file=sys.stderr,
             )
-            prepared_urdf = prepare_urdf(args.urdf, tmp_dir, args.height, keep_visuals=False, scene=args.scene)
-            model = mujoco.MjModel.from_xml_path(str(prepared_urdf))
+            model = load_mujoco_model(
+                args.urdf,
+                tmp_dir,
+                args.height,
+                keep_visuals=False,
+                scene=args.scene,
+                friction=args.friction,
+            )
         model.opt.timestep = 0.002
         model.geom_friction[:, 0] = np.maximum(model.geom_friction[:, 0], args.friction)
         data = mujoco.MjData(model)
@@ -691,7 +811,7 @@ def main() -> int:
             scene=args.scene,
             start_xy=(args.start_x, args.start_y),
             balance_assist=not args.no_assist,
-            auto_drive=not args.stand,
+            auto_drive=not args.stand and (abs(args.speed) > 1e-4 or abs(args.turn) > 1e-4),
         )
 
         print_help()
@@ -709,6 +829,7 @@ def main() -> int:
             viewer.cam.distance = 2.4
             viewer.cam.azimuth = 120
             viewer.cam.elevation = -18
+            viewer.cam.lookat[:] = [1.0, 0.0, 0.35]
             while viewer.is_running() and not controller.exit_requested:
                 step_started = time.time()
                 controller.step()
