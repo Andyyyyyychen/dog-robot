@@ -35,7 +35,8 @@ A/D 左右偏置  Q/E 转向      Space 清空指令
 R 重置姿态    H 帮助        Esc 退出
 ```
 
-详细说明见 `rl_sar-main/docs/manual_mujoco_jk03_cn.md`。
+详细说明见 `rl_sar-main/docs/manual_mujoco_jk03_cn.md`。深度学习训练前准备清单见
+`robot_lab-main/docs/jk03_pretrain_checklist_cn.md`。
 # zhexi-chen
 deeplearning for dog robot
 made by Andy Chen
