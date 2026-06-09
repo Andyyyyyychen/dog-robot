@@ -113,6 +113,10 @@ from rl_utils import camera_follow
 # PLACEHOLDER: Extension template (do not remove this comment)
 
 
+def get_runner_class_name(agent_cfg) -> str:
+    return getattr(agent_cfg, "class_name", "OnPolicyRunner")
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -204,12 +208,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
-    if agent_cfg.class_name == "OnPolicyRunner":
+    runner_class_name = get_runner_class_name(agent_cfg)
+    if runner_class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    elif agent_cfg.class_name == "DistillationRunner":
+    elif runner_class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
-        raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+        raise ValueError(f"Unsupported runner class: {runner_class_name}")
     runner.load(resume_path)
 
     # obtain the trained policy for inference
