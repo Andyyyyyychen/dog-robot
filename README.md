@@ -187,6 +187,8 @@ RobotLab-Isaac-Velocity-Rough-JK03-v0
 
 训练和测试优先使用 `--headless`，不要一开始就打开 Isaac Sim 图形界面。云服务器 Desktop 图形界面比较卡，适合短时间看效果，不适合长时间训练。
 
+下面的测试命令按云服务器上的 Rough 版本编写：
+
 进入项目：
 
 ```bash
@@ -199,7 +201,7 @@ cd /root/dog-robot-main/robot_lab-main
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/tools/zero_agent.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
   --headless \
   --num_envs 16
 ```
@@ -208,7 +210,7 @@ cd /root/dog-robot-main/robot_lab-main
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/tools/random_agent.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
   --headless \
   --num_envs 16
 ```
@@ -217,7 +219,7 @@ RSL-RL 一轮训练烟测：
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
   --headless \
   --num_envs 16 \
   --max_iterations 1
@@ -231,7 +233,7 @@ RSL-RL 一轮训练烟测：
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
   --headless \
   --num_envs 256 \
   --max_iterations 100
@@ -247,19 +249,19 @@ Training time: ...
 训练结果会写到：
 
 ```text
-robot_lab-main/logs/rsl_rl/jk03_flat/<run_time>/
+robot_lab-main/logs/rsl_rl/jk03_rough/<run_time>/
 ```
 
 查找最新模型：
 
 ```bash
-find logs/rsl_rl/jk03_flat -name "model_*.pt" | sort | tail
+find logs/rsl_rl/jk03_rough -name "model_*.pt" | sort | tail
 ```
 
 例如可能看到：
 
 ```text
-logs/rsl_rl/jk03_flat/2026-06-09_11-05-00/model_99.pt
+logs/rsl_rl/jk03_rough/2026-06-09_11-05-00/model_99.pt
 ```
 
 ## 8. 正式训练
@@ -306,8 +308,8 @@ watch -n 2 nvidia-smi
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
-  --checkpoint logs/rsl_rl/jk03_flat/<run_time>/model_<N>.pt \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
+  --checkpoint logs/rsl_rl/jk03_rough/<run_time>/model_<N>.pt \
   --headless \
   --video \
   --video_length 500 \
@@ -317,15 +319,15 @@ watch -n 2 nvidia-smi
 视频目录：
 
 ```text
-logs/rsl_rl/jk03_flat/<run_time>/videos/play/
+logs/rsl_rl/jk03_rough/<run_time>/videos/play/
 ```
 
 如果要在云服务器 Desktop 里打开 Isaac Sim 窗口并用键盘控制，使用：
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
-  --checkpoint logs/rsl_rl/jk03_flat/<run_time>/model_<N>.pt \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
+  --checkpoint logs/rsl_rl/jk03_rough/<run_time>/model_<N>.pt \
   --keyboard \
   --num_envs 1 \
   --real-time
@@ -343,7 +345,7 @@ logs/rsl_rl/jk03_flat/<run_time>/videos/play/
 
 ```bash
 cd /root/dog-robot-main/robot_lab-main
-tensorboard --logdir logs/rsl_rl/jk03_flat --host 127.0.0.1 --port 6006
+tensorboard --logdir logs/rsl_rl/jk03_rough --host 127.0.0.1 --port 6006
 ```
 
 Mac 另开一个终端：
@@ -374,7 +376,7 @@ http://127.0.0.1:6007
 
 ```bash
 mkdir -p ~/Desktop/jk03_results
-scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs/rsl_rl/jk03_flat/<run_time> ~/Desktop/jk03_results/
+scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs/rsl_rl/jk03_rough/<run_time> ~/Desktop/jk03_results/
 ```
 
 Mac 本地看 TensorBoard：
@@ -389,7 +391,7 @@ open http://127.0.0.1:6006
 
 ```bash
 mkdir -p ~/Desktop/jk03_videos
-scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs/rsl_rl/jk03_flat/<run_time>/videos/play ~/Desktop/jk03_videos/
+scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs/rsl_rl/jk03_rough/<run_time>/videos/play ~/Desktop/jk03_videos/
 open ~/Desktop/jk03_videos/play
 ```
 
@@ -410,8 +412,8 @@ FileNotFoundError
 
 ```bash
 /root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
-  --checkpoint logs/rsl_rl/jk03_flat/<run_time>/model_<N>.pt \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
+  --checkpoint logs/rsl_rl/jk03_rough/<run_time>/model_<N>.pt \
   --keyboard \
   --num_envs 1 \
   --real-time 2>&1 | tee /root/jk03_play.log
