@@ -72,6 +72,7 @@ from typing import Any
 import gymnasium as gym
 import torch
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+from tensordict import TensorDict
 
 from isaaclab.devices import Se2Keyboard, Se2KeyboardCfg
 from isaaclab.envs import (
@@ -86,7 +87,7 @@ from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 
 from isaaclab_rl.rsl_rl import (
-    RslRlVecEnvWrapper,
+    RslRlVecEnvWrapper as IsaacLabRslRlVecEnvWrapper,
     export_policy_as_jit,
     export_policy_as_onnx,
 )
@@ -111,6 +112,45 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from rl_utils import camera_follow
 
 # PLACEHOLDER: Extension template (do not remove this comment)
+
+
+def rsl_rl_obs_to_tensordict(obs, extras: dict | None, num_envs: int, device) -> TensorDict:
+    if isinstance(obs, TensorDict):
+        return obs
+    if hasattr(obs, "keys") and not isinstance(obs, torch.Tensor):
+        return TensorDict(dict(obs), batch_size=[num_envs], device=device)
+
+    obs_dict = {}
+    if extras is not None and isinstance(extras.get("observations"), dict):
+        obs_dict.update(extras["observations"])
+    if "policy" not in obs_dict:
+        obs_dict["policy"] = obs
+    return TensorDict(obs_dict, batch_size=[num_envs], device=device)
+
+
+class CompatRslRlVecEnvWrapper(IsaacLabRslRlVecEnvWrapper):
+    """Adapt older Isaac Lab wrappers to the TensorDict API used by RSL-RL 3.x."""
+
+    def get_observations(self):
+        observations = super().get_observations()
+        if isinstance(observations, tuple):
+            obs, extras = observations
+        else:
+            obs, extras = observations, None
+        return rsl_rl_obs_to_tensordict(obs, extras, self.num_envs, self.device)
+
+    def reset(self):
+        observations = super().reset()
+        if isinstance(observations, tuple):
+            obs, extras = observations
+        else:
+            obs, extras = observations, None
+        return rsl_rl_obs_to_tensordict(obs, extras, self.num_envs, self.device)
+
+    def step(self, actions):
+        obs, rewards, dones, extras = super().step(actions)
+        obs = rsl_rl_obs_to_tensordict(obs, extras, self.num_envs, self.device)
+        return obs, rewards, dones, extras
 
 
 def get_runner_class_name(agent_cfg) -> str:
@@ -210,7 +250,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # wrap around environment for rsl-rl
-    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+    env = CompatRslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
