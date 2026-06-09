@@ -136,6 +136,12 @@ def is_distillation_cfg(agent_cfg) -> bool:
     return get_runner_class_name(agent_cfg) == "DistillationRunner" or algorithm_class_name == "Distillation"
 
 
+def get_agent_cfg_dict(agent_cfg) -> dict:
+    agent_cfg_dict = agent_cfg.to_dict()
+    agent_cfg_dict.setdefault("obs_groups", {"policy": ["policy"], "critic": ["critic"]})
+    return agent_cfg_dict
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
@@ -224,10 +230,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # create runner from rsl-rl
     runner_class_name = get_runner_class_name(agent_cfg)
+    agent_cfg_dict = get_agent_cfg_dict(agent_cfg)
     if runner_class_name == "OnPolicyRunner":
-        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+        runner = OnPolicyRunner(env, agent_cfg_dict, log_dir=log_dir, device=agent_cfg.device)
     elif runner_class_name == "DistillationRunner":
-        runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+        runner = DistillationRunner(env, agent_cfg_dict, log_dir=log_dir, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {runner_class_name}")
     # write git state to logs
