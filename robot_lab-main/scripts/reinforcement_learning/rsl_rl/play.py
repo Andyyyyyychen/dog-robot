@@ -67,6 +67,7 @@ installed_version = metadata.version("rsl-rl-lib")
 
 import os
 import time
+from typing import Any
 
 import gymnasium as gym
 import torch
@@ -85,12 +86,15 @@ from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 
 from isaaclab_rl.rsl_rl import (
-    RslRlBaseRunnerCfg,
     RslRlVecEnvWrapper,
     export_policy_as_jit,
     export_policy_as_onnx,
     handle_deprecated_rsl_rl_cfg,
 )
+try:
+    from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
+except ImportError:
+    RslRlBaseRunnerCfg = Any
 from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
 from isaaclab_tasks.utils import get_checkpoint_path

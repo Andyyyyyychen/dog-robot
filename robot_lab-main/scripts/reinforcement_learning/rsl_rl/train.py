@@ -82,6 +82,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from typing import Any
 
 import gymnasium as gym
 import torch
@@ -97,7 +98,12 @@ from isaaclab.envs import (
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+
+try:
+    from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
+except ImportError:
+    RslRlBaseRunnerCfg = Any
 
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
