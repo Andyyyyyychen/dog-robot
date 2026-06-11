@@ -187,18 +187,44 @@ def wheel_spin_when_stuck(
     return reward
 
 
+def adaptive_lateral_force_ratio(
+    forces_z: torch.Tensor,
+    base_lateral_force_ratio: float,
+    min_lateral_force_ratio: float,
+    max_lateral_force_ratio: float,
+    vertical_force_eps: float,
+) -> torch.Tensor:
+    """Scale the lateral/vertical contact-force ratio with the current support load."""
+    support_load = torch.mean(torch.clamp(forces_z, min=vertical_force_eps), dim=1)
+    reference_load = torch.median(support_load.detach()).clamp(min=vertical_force_eps)
+    ratio = base_lateral_force_ratio * torch.sqrt(reference_load / torch.clamp(support_load, min=vertical_force_eps))
+    return torch.clamp(ratio, min=min_lateral_force_ratio, max=max_lateral_force_ratio)
+
+
 def wheel_spin_with_lateral_contact(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
-    lateral_force_ratio: float,
-    asset_cfg: SceneEntityCfg,
+    lateral_force_ratio: float | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    base_lateral_force_ratio: float | None = None,
+    min_lateral_force_ratio: float = 1.3,
+    max_lateral_force_ratio: float = 3.0,
+    vertical_force_eps: float = 5.0,
 ) -> torch.Tensor:
     """Penalize wheel spinning against vertical edges such as stair risers."""
+    if base_lateral_force_ratio is None:
+        base_lateral_force_ratio = lateral_force_ratio if lateral_force_ratio is not None else 2.0
+
     asset: Articulation = env.scene[asset_cfg.name]
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
     forces_xy = torch.linalg.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
-    vertical_edge_contact = torch.any(forces_xy > lateral_force_ratio * torch.clamp(forces_z, min=1.0), dim=1)
+    adaptive_ratio = adaptive_lateral_force_ratio(
+        forces_z, base_lateral_force_ratio, min_lateral_force_ratio, max_lateral_force_ratio, vertical_force_eps
+    )
+    vertical_edge_contact = torch.any(
+        forces_xy > adaptive_ratio.unsqueeze(1) * torch.clamp(forces_z, min=vertical_force_eps), dim=1
+    )
     wheel_speed = torch.sum(torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
     reward = wheel_speed * vertical_edge_contact.float()
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7

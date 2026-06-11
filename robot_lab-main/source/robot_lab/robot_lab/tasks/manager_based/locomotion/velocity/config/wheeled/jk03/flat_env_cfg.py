@@ -21,8 +21,50 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None
         self.observations.critic.height_scan = None
+
+        # Flat pretraining should first learn clean forward and turning commands.
+        # Keep the JK03 initial pose unchanged, but remove rough-terrain early
+        # penalties that can make the first flat policy prefer not moving.
+        self.events.randomize_reset_base.params = {
+            "pose_range": {
+                "x": (-0.2, 0.2),
+                "y": (-0.2, 0.2),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (-3.14, 3.14),
+            },
+            "velocity_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+        }
+
+        self.rewards.track_lin_vel_xy_exp.weight = 6.0
+        self.rewards.track_ang_vel_z_exp.weight = 4.0
+        self.rewards.joint_pos_penalty.weight = -0.45
+        self.rewards.action_rate_l2.weight = -0.003
+        self.rewards.wheel_vel_penalty.weight = 0
+        self.rewards.feet_stumble.weight = 0
+        self.rewards.feet_slide.weight = -0.05
+        self.rewards.feet_height_body.weight = 0
+        self.rewards.wheel_spin_when_stuck.weight = 0
+        self.rewards.wheel_spin_with_lateral_contact.weight = 0
+
+        self.rewards.stand_still.params["command_threshold"] = 0.03
+        self.rewards.joint_pos_penalty.params["command_threshold"] = 0.03
+        self.rewards.wheel_vel_penalty.params["command_threshold"] = 0.03
+        self.rewards.stuck_with_command.params["command_threshold"] = 0.08
+        self.rewards.wheel_spin_when_stuck.params["command_threshold"] = 0.08
+
         # no terrain curriculum
         self.curriculum.terrain_levels = None
+        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "JK03FlatEnvCfg":

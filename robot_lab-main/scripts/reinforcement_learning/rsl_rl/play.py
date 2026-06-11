@@ -70,6 +70,7 @@ import time
 from typing import Any
 
 import gymnasium as gym
+import numpy as np
 import torch
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 from tensordict import TensorDict
@@ -167,6 +168,15 @@ def get_agent_cfg_dict(agent_cfg) -> dict:
     return agent_cfg_dict
 
 
+def map_lateral_arrows_to_yaw(controller: Se2Keyboard, yaw_sensitivity: float):
+    """Use arrow-left/right as yaw commands when the task does not train lateral velocity."""
+    key_mapping = getattr(controller, "_INPUT_KEY_MAPPING", None)
+    if key_mapping is None:
+        return
+    key_mapping["LEFT"] = np.asarray([0.0, 0.0, yaw_sensitivity])
+    key_mapping["RIGHT"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -211,6 +221,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             omega_z_sensitivity=env_cfg.commands.base_velocity.ranges.ang_vel_z[1],
         )
         controller = Se2Keyboard(config)
+        lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
+        if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
+            map_lateral_arrows_to_yaw(controller, env_cfg.commands.base_velocity.ranges.ang_vel_z[1])
         env_cfg.observations.policy.velocity_commands = ObsTerm(
             func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
         )
