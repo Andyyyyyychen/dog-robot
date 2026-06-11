@@ -300,7 +300,124 @@ robot_lab-main/logs/rsl_rl/jk03_rough/<run_time>/
 watch -n 2 nvidia-smi
 ```
 
-## 9. 播放训练后的模型
+## 9. 训练卡住后继续训练
+
+如果训练停在某个 iteration，比如 `2887`，不要立刻重开。先判断它是真的卡死，还是只是当前 iteration 比较慢。
+
+新开一个终端检查 GPU：
+
+```bash
+nvidia-smi
+```
+
+如果能看到 `python` 占用 GPU，且 GPU-Util 不是一直 `0%`，说明训练大概率还活着，只是比较慢，可以先等一会儿。
+
+再检查训练进程：
+
+```bash
+ps -ef | grep train.py | grep -v grep
+```
+
+如果有输出，说明 `train.py` 还在运行。如果没有输出，或者 GPU 上也没有训练进程，说明训练已经断了，可以从最近的 checkpoint 继续。
+
+本项目 PPO 配置里通常每 100 次保存一次：
+
+```text
+save_interval = 100
+```
+
+所以如果训练停在 `2887`，最近的模型通常是：
+
+```text
+model_2800.pt
+```
+
+进入项目目录，查找最新 checkpoint：
+
+```bash
+cd /root/dog-robot-main/robot_lab-main
+find logs/rsl_rl -name "model_*.pt" | sort -V | tail -20
+```
+
+Rough 训练一般在：
+
+```text
+logs/rsl_rl/jk03_rough/<run_time>/
+```
+
+Flat 训练一般在：
+
+```text
+logs/rsl_rl/jk03_flat/<run_time>/
+```
+
+继续 Rough 训练，把 `<run_time>` 和 `model_<N>.pt` 换成实际找到的目录和模型：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --resume \
+  --load_run <run_time> \
+  --checkpoint model_<N>.pt \
+  --max_iterations 20000
+```
+
+例如停在 `2887`，找到了 `model_2800.pt`，目录是 `2026-06-11_12-30-00`：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Rough-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --resume \
+  --load_run 2026-06-11_12-30-00 \
+  --checkpoint model_2800.pt \
+  --max_iterations 20000
+```
+
+继续 Flat 训练时，只需要把 task 换成 Flat，并且使用 `jk03_flat` 下面对应的 `<run_time>`：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --resume \
+  --load_run <run_time> \
+  --checkpoint model_<N>.pt \
+  --max_iterations 5000
+```
+
+长时间训练建议放进 `tmux`，这样 SSH 断开也不会停止训练：
+
+```bash
+tmux new -s jk03
+```
+
+在 `tmux` 里运行训练命令。想退出终端但保留训练，按：
+
+```text
+Ctrl + B
+然后按 D
+```
+
+重新回到训练窗口：
+
+```bash
+tmux attach -t jk03
+```
+
+查看已有 `tmux` 会话：
+
+```bash
+tmux ls
+```
+
+如果训练窗口里已经卡死，可以先用 `Ctrl + C` 停掉，再按上面的 `--resume` 命令从最新 checkpoint 继续。
+
+## 10. 播放训练后的模型
 
 把 `<run_time>` 和 `<N>` 换成实际的 checkpoint 目录和模型编号。
 
@@ -337,7 +454,7 @@ logs/rsl_rl/jk03_rough/<run_time>/videos/play/
 
 `--keyboard` 使用 Isaac Lab 的 `Se2Keyboard`，发送的是速度指令。常用的是方向键或小键盘方向键；如果 `WASD` 没反应，先用方向键和数字小键盘测试。
 
-## 10. 在 Mac 上看云端训练结果
+## 11. 在 Mac 上看云端训练结果
 
 ### 方法 A：SSH 隧道看 TensorBoard
 
@@ -395,7 +512,7 @@ scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs
 open ~/Desktop/jk03_videos/play
 ```
 
-## 11. 常见问题
+## 12. 常见问题
 
 ### Isaac Sim 打开一下就没了
 
@@ -456,7 +573,7 @@ RobotLab-Isaac-Velocity-Flat-JK03-v0
 RobotLab-Isaac-Velocity-Rough-JK03-v0
 ```
 
-## 12. 更多文档
+## 13. 更多文档
 
 ```text
 robot_lab-main/docs/jk03_pretrain_checklist_cn.md
