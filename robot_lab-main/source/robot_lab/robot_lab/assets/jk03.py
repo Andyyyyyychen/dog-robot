@@ -34,11 +34,11 @@ JK03_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.52),
+        pos=(0.0, 0.0, 0.43),
         joint_pos={
             ".*_hipx_joint": 0.0,
-            ".*_hipy_joint": 0.0,
-            ".*_knee_joint": -1.2,
+            ".*_hipy_joint": 0.9,
+            ".*_knee_joint": -1.33,
             ".*_wheel_joint": 0.0,
         },
         joint_vel={".*": 0.0},

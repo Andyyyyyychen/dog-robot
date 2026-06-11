@@ -153,6 +153,58 @@ def wheel_vel_penalty(
     return reward
 
 
+def stuck_with_command(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    velocity_threshold: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize commanded robots that are nearly not moving."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    cmd_xy = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    body_vel_xy = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    reward = torch.logical_and(cmd_xy > command_threshold, body_vel_xy < velocity_threshold).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def wheel_spin_when_stuck(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    velocity_threshold: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize wheel spinning when a commanded robot is barely translating."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd_xy = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    body_vel_xy = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    wheel_speed = torch.sum(torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
+    is_stuck = torch.logical_and(cmd_xy > command_threshold, body_vel_xy < velocity_threshold)
+    reward = wheel_speed * is_stuck.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def wheel_spin_with_lateral_contact(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    lateral_force_ratio: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize wheel spinning against vertical edges such as stair risers."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
+    forces_xy = torch.linalg.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
+    vertical_edge_contact = torch.any(forces_xy > lateral_force_ratio * torch.clamp(forces_z, min=1.0), dim=1)
+    wheel_speed = torch.sum(torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
+    reward = wheel_speed * vertical_edge_contact.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 

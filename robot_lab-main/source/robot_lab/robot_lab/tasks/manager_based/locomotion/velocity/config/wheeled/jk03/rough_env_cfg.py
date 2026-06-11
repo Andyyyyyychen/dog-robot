@@ -47,6 +47,33 @@ class JK03RewardsCfg(RewardsCfg):
         func=mdp.joint_torques_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
     )
 
+    stuck_with_command = RewTerm(
+        func=mdp.stuck_with_command,
+        weight=0.0,
+        params={"command_name": "base_velocity", "command_threshold": 0.35, "velocity_threshold": 0.12},
+    )
+
+    wheel_spin_when_stuck = RewTerm(
+        func=mdp.wheel_spin_when_stuck,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.35,
+            "velocity_threshold": 0.12,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
+    wheel_spin_with_lateral_contact = RewTerm(
+        func=mdp.wheel_spin_with_lateral_contact,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "lateral_force_ratio": 2.5,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
@@ -77,6 +104,30 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = JK03_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.terrain.max_init_terrain_level = 2
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None and terrain_generator.sub_terrains is not None:
+            stair_training_proportions = {
+                "random_rough": 0.05,
+                "hf_pyramid_slope": 0.05,
+                "hf_pyramid_slope_inv": 0.05,
+                "boxes": 0.05,
+                "pyramid_stairs": 0.75,
+                "pyramid_stairs_inv": 0.05,
+            }
+            for terrain_name, proportion in stair_training_proportions.items():
+                if terrain_name in terrain_generator.sub_terrains:
+                    terrain_generator.sub_terrains[terrain_name].proportion = proportion
+            for terrain_name in ("pyramid_stairs", "pyramid_stairs_inv"):
+                if terrain_name not in terrain_generator.sub_terrains:
+                    continue
+                stair_cfg = terrain_generator.sub_terrains[terrain_name]
+                if hasattr(stair_cfg, "step_height_range"):
+                    stair_cfg.step_height_range = (0.03, 0.12)
+                if hasattr(stair_cfg, "step_width"):
+                    stair_cfg.step_width = 0.40
+                if hasattr(stair_cfg, "platform_width"):
+                    stair_cfg.platform_width = 2.2
 
         # ------------------------------Observations------------------------------
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
@@ -92,14 +143,13 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
-        self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = {".*_hipx_joint": 0.125, "^(?!.*_hipx_joint).*": 0.25}
-        self.actions.joint_vel.scale = 5.0
+        self.actions.joint_pos.scale = {".*_hipx_joint": 0.18, "^(?!.*_hipx_joint).*": 0.30}
+        self.actions.joint_vel.scale = 6.0
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.leg_joint_names
@@ -139,14 +189,14 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = 0
-        self.rewards.base_height_l2.params["target_height"] = 0.52
+        self.rewards.base_height_l2.weight = -2.0
+        self.rewards.base_height_l2.params["target_height"] = 0.43
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
 
         # Joint penalties
-        self.rewards.joint_torques_l2.weight = -2.5e-5
+        self.rewards.joint_torques_l2.weight = -1.0e-5
         self.rewards.joint_torques_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_torques_wheel_l2.weight = 0
         self.rewards.joint_torques_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -163,33 +213,40 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_limits.weight = 0
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_power.weight = -2e-5
+        self.rewards.joint_power.weight = -1.0e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still.weight = -2.0
         self.rewards.stand_still.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -1.0
+        self.rewards.joint_pos_penalty.weight = -0.8
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.wheel_vel_penalty.weight = 0
+        self.rewards.wheel_vel_penalty.weight = -0.02
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.joint_mirror.weight = -0.03
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["fl_(hipx|hipy|knee).*", "hr_(hipx|hipy|knee).*"],
             ["fr_(hipx|hipy|knee).*", "hl_(hipx|hipy|knee).*"],
         ]
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.006
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -1.0
+        self.rewards.undesired_contacts.weight = -2.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.contact_forces.params["threshold"] = 500.0
+        self.rewards.stuck_with_command.weight = -1.0
+        self.rewards.wheel_spin_when_stuck.weight = -0.002
+        self.rewards.wheel_spin_when_stuck.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.wheel_spin_with_lateral_contact.weight = -0.003
+        self.rewards.wheel_spin_with_lateral_contact.params["sensor_cfg"].body_names = self.foot_link_name
+        self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.5
+        self.rewards.track_lin_vel_xy_exp.weight = 5.5
+        self.rewards.track_ang_vel_z_exp.weight = 3.5
 
         # Others
         self.rewards.feet_air_time.weight = 0
@@ -199,9 +256,9 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact_without_cmd.weight = 0.1
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_stumble.weight = 0
+        self.rewards.feet_stumble.weight = -0.4
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_slide.weight = 0
+        self.rewards.feet_slide.weight = -0.15
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height.weight = 0
@@ -219,16 +276,26 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        self.terminations.illegal_contact = None
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        self.terminations.illegal_contact.params["threshold"] = 20.0
 
         # ------------------------------Curriculums------------------------------
-        # self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.2, 1.0)
-        # self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.2, 1.0)
-        self.curriculum.command_levels_lin_vel = None
-        self.curriculum.command_levels_ang_vel = None
+        self.curriculum.terrain_levels.func = mdp.terrain_levels_jk03_stairs
+        self.curriculum.terrain_levels.params = {
+            "asset_cfg": SceneEntityCfg("robot"),
+            "up_command_scale": 0.55,
+            "down_command_scale": 0.18,
+            "min_up_distance": 1.2,
+            "max_up_distance": 2.4,
+            "min_down_distance": 0.25,
+            "max_down_distance": 0.8,
+        }
+        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.2, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.2, 1.0)
 
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-2.0, 2.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.rel_standing_envs = 0.0
+        self.commands.base_velocity.ranges.lin_vel_x = (0.05, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.8, 0.8)
+        self.commands.base_velocity.ranges.heading = (-0.7, 0.7)

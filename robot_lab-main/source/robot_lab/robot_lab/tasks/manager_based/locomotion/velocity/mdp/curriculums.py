@@ -14,8 +14,41 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from isaaclab.managers import SceneEntityCfg
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+
+def terrain_levels_jk03_stairs(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    up_command_scale: float = 0.55,
+    down_command_scale: float = 0.18,
+    min_up_distance: float = 1.2,
+    max_up_distance: float = 2.4,
+    min_down_distance: float = 0.25,
+    max_down_distance: float = 0.8,
+) -> torch.Tensor:
+    """Terrain curriculum tuned for slow stair climbing."""
+    asset = env.scene[asset_cfg.name]
+    terrain = env.scene.terrain
+    command_xy = torch.linalg.norm(env.command_manager.get_command("base_velocity")[env_ids, :2], dim=1)
+
+    distance = torch.linalg.norm(asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1)
+    expected_distance = command_xy * env.max_episode_length_s
+    move_up_distance = torch.clamp(expected_distance * up_command_scale, min=min_up_distance, max=max_up_distance)
+    move_down_distance = torch.clamp(
+        expected_distance * down_command_scale, min=min_down_distance, max=max_down_distance
+    )
+
+    move_up = distance > move_up_distance
+    move_down = distance < move_down_distance
+    move_down *= ~move_up
+
+    terrain.update_env_origins(env_ids, move_up, move_down)
+    return torch.mean(terrain.terrain_levels.float())
 
 
 def command_levels_lin_vel(
