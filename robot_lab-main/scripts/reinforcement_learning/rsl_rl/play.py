@@ -215,15 +215,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
+        keyboard_yaw_sensitivity = 0.45 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1]
         config = Se2KeyboardCfg(
             v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
             v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
-            omega_z_sensitivity=env_cfg.commands.base_velocity.ranges.ang_vel_z[1],
+            omega_z_sensitivity=keyboard_yaw_sensitivity,
         )
         controller = Se2Keyboard(config)
         lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
         if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
-            map_lateral_arrows_to_yaw(controller, env_cfg.commands.base_velocity.ranges.ang_vel_z[1])
+            map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
         env_cfg.observations.policy.velocity_commands = ObsTerm(
             func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
         )
