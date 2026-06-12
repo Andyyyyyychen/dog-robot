@@ -107,15 +107,15 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = JK03_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.max_init_terrain_level = 2
+        self.scene.terrain.max_init_terrain_level = 1
         terrain_generator = self.scene.terrain.terrain_generator
         if terrain_generator is not None and terrain_generator.sub_terrains is not None:
             stair_training_proportions = {
-                "random_rough": 0.05,
+                "random_rough": 0.10,
                 "hf_pyramid_slope": 0.05,
                 "hf_pyramid_slope_inv": 0.05,
-                "boxes": 0.05,
-                "pyramid_stairs": 0.75,
+                "boxes": 0.10,
+                "pyramid_stairs": 0.65,
                 "pyramid_stairs_inv": 0.05,
             }
             for terrain_name, proportion in stair_training_proportions.items():
@@ -126,9 +126,9 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                     continue
                 stair_cfg = terrain_generator.sub_terrains[terrain_name]
                 if hasattr(stair_cfg, "step_height_range"):
-                    stair_cfg.step_height_range = (0.03, 0.12)
+                    stair_cfg.step_height_range = (0.02, 0.10)
                 if hasattr(stair_cfg, "step_width"):
-                    stair_cfg.step_width = 0.40
+                    stair_cfg.step_width = 0.45
                 if hasattr(stair_cfg, "platform_width"):
                     stair_cfg.platform_width = 2.2
 
@@ -192,7 +192,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = -1.5
+        self.rewards.base_height_l2.weight = -0.8
         self.rewards.base_height_l2.params["target_height"] = 0.43
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -207,7 +207,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_wheel_l2.weight = 0
         self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_acc_l2.weight = -2.5e-7
+        self.rewards.joint_acc_l2.weight = -3.5e-7
         self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_acc_wheel_l2.weight = -2.5e-9
         self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -232,7 +232,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         ]
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.015
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
@@ -248,8 +248,8 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0
-        self.rewards.track_ang_vel_z_exp.weight = 3.5
+        self.rewards.track_lin_vel_xy_exp.weight = 4.5
+        self.rewards.track_ang_vel_z_exp.weight = 2.5
 
         # Others
         self.rewards.feet_air_time.weight = 0
@@ -267,10 +267,13 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height.weight = 0
         self.rewards.feet_height.params["target_height"] = 0.1
         self.rewards.feet_height.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_height_body.weight = -0.6
-        self.rewards.feet_height_body.params["target_height"] = -0.39
+        self.rewards.feet_height_body.weight = 0
+        self.rewards.feet_height_body.params["target_height"] = -0.40
         self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_gait.weight = 0
+        self.rewards.feet_gait.weight = 0.2
+        self.rewards.feet_gait.params["command_threshold"] = 0.08
+        self.rewards.feet_gait.params["velocity_threshold"] = 0.15
+        self.rewards.feet_gait.params["max_err"] = 0.25
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("fl_wheel", "hr_wheel"), ("fr_wheel", "hl_wheel"))
         self.rewards.upward.weight = 1.0
 
@@ -298,7 +301,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.rel_standing_envs = 0.0
-        self.commands.base_velocity.ranges.lin_vel_x = (0.05, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.05, 0.8)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.7, 0.7)
-        self.commands.base_velocity.ranges.heading = (-0.7, 0.7)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.heading = (-0.6, 0.6)

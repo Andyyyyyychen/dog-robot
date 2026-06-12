@@ -177,6 +177,22 @@ def map_lateral_arrows_to_yaw(controller: Se2Keyboard, yaw_sensitivity: float):
     key_mapping["RIGHT"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
 
 
+def make_smoothed_keyboard_command(controller: Se2Keyboard, smoothing: float = 0.85):
+    """Low-pass keyboard velocity commands to avoid abrupt yaw spikes in play mode."""
+    command = None
+
+    def advance(env):
+        nonlocal command
+        target = torch.tensor(controller.advance(), dtype=torch.float32, device=env.device).unsqueeze(0)
+        if command is None or command.device != env.device:
+            command = target
+        else:
+            command = smoothing * command + (1.0 - smoothing) * target
+        return command
+
+    return advance
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -226,7 +242,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
             map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
+            func=make_smoothed_keyboard_command(controller),
         )
 
     # specify directory for logging experiments
