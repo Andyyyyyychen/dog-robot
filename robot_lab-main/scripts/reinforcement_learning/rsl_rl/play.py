@@ -213,6 +213,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
+        env_cfg.scene.terrain.max_init_terrain_level = 0
+        if env_cfg.scene.terrain.terrain_generator is not None:
+            env_cfg.scene.terrain.terrain_generator.curriculum = False
+        env_cfg.events.randomize_reset_base.params = {
+            "pose_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+            "velocity_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+        }
+        env_cfg.curriculum.terrain_levels = None
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
         keyboard_yaw_sensitivity = 0.45 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1]
