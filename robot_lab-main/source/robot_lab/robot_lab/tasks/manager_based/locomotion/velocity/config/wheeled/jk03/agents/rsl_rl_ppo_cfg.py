@@ -13,7 +13,7 @@ class JK03RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 100
     experiment_name = "jk03_rough"
     policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
+        init_noise_std=0.6,
         actor_obs_normalization=False,
         critic_obs_normalization=False,
         actor_hidden_dims=[512, 256, 128],
@@ -24,15 +24,15 @@ class JK03RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=1.0e-3,
+        entropy_coef=0.005,
+        num_learning_epochs=4,
+        num_mini_batches=8,
+        learning_rate=3.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
+        desired_kl=0.008,
+        max_grad_norm=0.5,
     )
 
 
