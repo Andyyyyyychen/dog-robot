@@ -452,7 +452,76 @@ logs/rsl_rl/jk03_rough/<run_time>/videos/play/
 
 键盘控制时不要加 `--headless`。Isaac Sim 窗口出现后，先用鼠标点一下仿真视口，让键盘焦点进入窗口。
 
-`--keyboard` 使用 Isaac Lab 的 `Se2Keyboard`，发送的是速度指令。常用的是方向键或小键盘方向键；如果 `WASD` 没反应，先用方向键和数字小键盘测试。
+`--keyboard` 使用 Isaac Lab 的 `Se2Keyboard`，发送的是速度指令，不是直接控制电机。当前 `play.py` 已经加入键盘调试打印和备用键位：
+
+```text
+上箭头 / W：前进
+下箭头 / S：后退或减速
+左箭头 / A / Q：左转
+右箭头 / D / E：右转
+```
+
+JK03 的训练配置里 `lin_vel_y = 0`，所以左右键不是横向平移，而是 yaw 转向。
+
+### 键盘没有反应时怎么排查
+
+如果进入 Isaac Sim 画面后，按上下左右或者 `W/S/A/D/Q/E` 仍然没有反应，先看运行 `play.py` 的终端有没有下面这种输出：
+
+```text
+[KEYBOARD] Debug enabled. Click the Isaac Sim viewport, then press arrow keys. Expected nonzero vx/yaw values will print here.
+[KEYBOARD] command vx= 0.000, vy= 0.000, yaw= 0.000
+```
+
+按 `W` 或上箭头时，正常应该看到：
+
+```text
+[KEYBOARD] command vx= 0.900, vy= 0.000, yaw= 0.000
+```
+
+按 `A/Q` 或左箭头时，正常应该看到：
+
+```text
+[KEYBOARD] command vx= 0.000, vy= 0.000, yaw= 0.225
+```
+
+如果终端里完全没有 `[KEYBOARD] Debug enabled`，说明当前运行的不是调试版 `play.py`，或者没有进入 `--keyboard` 分支。按顺序检查：
+
+```bash
+pwd
+
+grep -n "Debug enabled" /root/dog-robot-main/robot_lab-main/scripts/reinforcement_learning/rsl_rl/play.py
+
+ps -eo pid,etime,cmd | grep "rsl_rl/play.py" | grep -v grep
+```
+
+正常运行目录应该是：
+
+```text
+/root/dog-robot-main/robot_lab-main
+```
+
+如果 `grep` 没有输出，说明服务器上的 `play.py` 不是最新版。重新从 GitHub 拉取或者重新上传本地最新版。
+
+如果终端能看到 `[KEYBOARD] command`，但按键后数值一直是 `0.000`，通常是远程桌面或 Isaac Sim 窗口没有收到键盘事件。处理方法：
+
+```text
+1. 鼠标点一下 Isaac Sim 的 3D 视口。
+2. 不要只试方向键，试 W/S/A/D/Q/E。
+3. 不要在 SSH 终端里按键，必须在云服务器 Desktop 的 Isaac Sim 窗口里按。
+4. 不要加 --headless。
+5. 关闭旧的 play.py 进程后重新运行。
+```
+
+如果按键后 `[KEYBOARD] command` 数值变化了，但狗还是不动，说明键盘输入已经进来了，问题不在键盘，而可能是：
+
+```text
+1. 当前 checkpoint 没学会响应命令。
+2. 机器人初始姿态卡在地形或台阶边。
+3. 机器人已经摔倒或身体/轮子被地形顶住。
+4. 模型在 rough 地形上学到的动作还不稳定。
+```
+
+这种情况下优先换一个更新的 checkpoint，例如 `model_5000.pt`、`model_6000.pt`，或者录视频分析动作。
 
 ## 11. 在 Mac 上看云端训练结果
 

@@ -177,6 +177,19 @@ def map_lateral_arrows_to_yaw(controller: Se2Keyboard, yaw_sensitivity: float):
     key_mapping["RIGHT"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
 
 
+def add_keyboard_fallback_keys(controller: Se2Keyboard, x_sensitivity: float, yaw_sensitivity: float):
+    """Add WASD/QE fallbacks for remote desktops that do not forward arrow keys."""
+    key_mapping = getattr(controller, "_INPUT_KEY_MAPPING", None)
+    if key_mapping is None:
+        return
+    key_mapping["W"] = np.asarray([x_sensitivity, 0.0, 0.0])
+    key_mapping["S"] = np.asarray([-x_sensitivity, 0.0, 0.0])
+    key_mapping["A"] = np.asarray([0.0, 0.0, yaw_sensitivity])
+    key_mapping["D"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+    key_mapping["Q"] = np.asarray([0.0, 0.0, yaw_sensitivity])
+    key_mapping["E"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -244,11 +257,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             omega_z_sensitivity=keyboard_yaw_sensitivity,
         )
         controller = Se2Keyboard(config)
+        add_keyboard_fallback_keys(controller, env_cfg.commands.base_velocity.ranges.lin_vel_x[1], keyboard_yaw_sensitivity)
         lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
         if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
             map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
+        print(
+            "[KEYBOARD] Debug enabled. Click the Isaac Sim viewport, then press arrow keys. "
+            "Expected nonzero vx/yaw values will print here.",
+            flush=True,
+        )
+        keyboard_debug_state = {"last_time": 0.0, "last_command": np.zeros(3, dtype=np.float32)}
+
+        def keyboard_obs_term(env):
+            command_np = np.asarray(controller.advance(), dtype=np.float32)
+            now = time.time()
+            command_changed = np.linalg.norm(command_np - keyboard_debug_state["last_command"]) > 1.0e-4
+            if command_changed or now - keyboard_debug_state["last_time"] >= 1.0:
+                print(
+                    "[KEYBOARD] command "
+                    f"vx={command_np[0]: .3f}, vy={command_np[1]: .3f}, yaw={command_np[2]: .3f}",
+                    flush=True,
+                )
+                keyboard_debug_state["last_time"] = now
+                keyboard_debug_state["last_command"] = command_np.copy()
+            return torch.tensor(command_np, dtype=torch.float32).unsqueeze(0).to(env.device)
+
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
+            func=keyboard_obs_term,
         )
 
     # specify directory for logging experiments
