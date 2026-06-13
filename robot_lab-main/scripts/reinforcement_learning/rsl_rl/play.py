@@ -182,12 +182,18 @@ def add_keyboard_fallback_keys(controller: Se2Keyboard, x_sensitivity: float, ya
     key_mapping = getattr(controller, "_INPUT_KEY_MAPPING", None)
     if key_mapping is None:
         return
+    key_mapping["UP"] = np.asarray([x_sensitivity, 0.0, 0.0])
+    key_mapping["DOWN"] = np.asarray([-x_sensitivity, 0.0, 0.0])
     key_mapping["W"] = np.asarray([x_sensitivity, 0.0, 0.0])
     key_mapping["S"] = np.asarray([-x_sensitivity, 0.0, 0.0])
     key_mapping["A"] = np.asarray([0.0, 0.0, yaw_sensitivity])
     key_mapping["D"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
     key_mapping["Q"] = np.asarray([0.0, 0.0, yaw_sensitivity])
     key_mapping["E"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+    key_mapping["NUMPAD_8"] = np.asarray([x_sensitivity, 0.0, 0.0])
+    key_mapping["NUMPAD_2"] = np.asarray([-x_sensitivity, 0.0, 0.0])
+    key_mapping["NUMPAD_4"] = np.asarray([0.0, 0.0, yaw_sensitivity])
+    key_mapping["NUMPAD_6"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -261,6 +267,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
         if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
             map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
+        command_clip = {
+            "x": (min(0.0, env_cfg.commands.base_velocity.ranges.lin_vel_x[0]), env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
+            "y": env_cfg.commands.base_velocity.ranges.lin_vel_y,
+            "yaw": env_cfg.commands.base_velocity.ranges.ang_vel_z,
+        }
         print(
             "[KEYBOARD] Debug enabled. Click the Isaac Sim viewport, then press arrow keys. "
             "Expected nonzero vx/yaw values will print here.",
@@ -270,6 +281,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         def keyboard_obs_term(env):
             command_np = np.asarray(controller.advance(), dtype=np.float32)
+            command_np[0] = np.clip(command_np[0], command_clip["x"][0], command_clip["x"][1])
+            command_np[1] = np.clip(command_np[1], command_clip["y"][0], command_clip["y"][1])
+            command_np[2] = np.clip(command_np[2], command_clip["yaw"][0], command_clip["yaw"][1])
             now = time.time()
             command_changed = np.linalg.norm(command_np - keyboard_debug_state["last_command"]) > 1.0e-4
             if command_changed or now - keyboard_debug_state["last_time"] >= 1.0:
@@ -373,6 +387,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     obs = env.get_observations()
     timestep = 0
+    play_debug_state = {"last_time": 0.0}
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -387,13 +402,42 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 policy.reset(dones)
             else:
                 policy_nn.reset(dones)
+        if args_cli.keyboard and time.time() - play_debug_state["last_time"] >= 1.0:
+            try:
+                robot = env.unwrapped.scene["robot"]
+                base_lin_vel = robot.data.root_lin_vel_b[0].detach().cpu().numpy()
+                base_ang_vel = robot.data.root_ang_vel_b[0].detach().cpu().numpy()
+                action_mean = actions[0].abs().mean().item()
+                action_max = actions[0].abs().max().item()
+                leg_action_mean = actions[0, :12].abs().mean().item() if actions.shape[1] >= 12 else float("nan")
+                wheel_action_mean = actions[0, 12:].abs().mean().item() if actions.shape[1] > 12 else float("nan")
+                joint_names = getattr(robot, "joint_names", None) or getattr(robot.data, "joint_names", [])
+                wheel_ids = [index for index, name in enumerate(joint_names) if "wheel_joint" in name]
+                if wheel_ids:
+                    wheel_vel_mean = robot.data.joint_vel[0, wheel_ids].abs().mean().item()
+                    wheel_vel_max = robot.data.joint_vel[0, wheel_ids].abs().max().item()
+                else:
+                    wheel_vel_mean = float("nan")
+                    wheel_vel_max = float("nan")
+                print(
+                    "[PLAY] "
+                    f"action_mean={action_mean:.3f}, action_max={action_max:.3f}, "
+                    f"leg_action_mean={leg_action_mean:.3f}, wheel_action_mean={wheel_action_mean:.3f}, "
+                    f"wheel_vel_mean={wheel_vel_mean:.3f}, wheel_vel_max={wheel_vel_max:.3f}, "
+                    f"base_vx={base_lin_vel[0]: .3f}, base_vy={base_lin_vel[1]: .3f}, "
+                    f"base_wz={base_ang_vel[2]: .3f}, done={bool(dones[0])}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"[PLAY] debug unavailable: {exc}", flush=True)
+            play_debug_state["last_time"] = time.time()
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
 
-        if args_cli.keyboard:
+        if args_cli.keyboard or args_cli.video:
             camera_follow(env)
 
         # time delay for real-time evaluation

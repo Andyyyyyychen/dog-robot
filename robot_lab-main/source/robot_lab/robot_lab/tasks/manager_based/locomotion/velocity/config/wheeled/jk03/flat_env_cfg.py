@@ -44,21 +44,26 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
             },
         }
 
-        self.rewards.track_lin_vel_xy_exp.weight = 6.0
-        self.rewards.track_ang_vel_z_exp.weight = 4.0
+        self.rewards.track_lin_vel_xy_exp.weight = 8.0
+        self.rewards.track_ang_vel_z_exp.weight = 5.0
         self.rewards.joint_pos_penalty.weight = -0.45
         self.rewards.action_rate_l2.weight = -0.003
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
         self.rewards.feet_slide.weight = -0.05
         self.rewards.feet_height_body.weight = 0
+        self.rewards.stuck_with_command.weight = -4.0
+        self.rewards.stuck_with_command.params["command_threshold"] = 0.08
+        self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
+        self.rewards.yaw_stuck_with_command.weight = -3.0
+        self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
+        self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.rewards.wheel_spin_when_stuck.weight = 0
         self.rewards.wheel_spin_with_lateral_contact.weight = 0
 
         self.rewards.stand_still.params["command_threshold"] = 0.03
         self.rewards.joint_pos_penalty.params["command_threshold"] = 0.03
         self.rewards.wheel_vel_penalty.params["command_threshold"] = 0.03
-        self.rewards.stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.wheel_spin_when_stuck.params["command_threshold"] = 0.08
 
         # no terrain curriculum

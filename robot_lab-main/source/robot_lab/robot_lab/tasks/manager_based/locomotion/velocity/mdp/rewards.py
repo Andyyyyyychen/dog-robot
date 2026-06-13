@@ -169,6 +169,22 @@ def stuck_with_command(
     return reward
 
 
+def yaw_stuck_with_command(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    yaw_velocity_threshold: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize commanded yaw turns that produce almost no body yaw rate."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    cmd_yaw = torch.abs(env.command_manager.get_command(command_name)[:, 2])
+    body_yaw = torch.abs(asset.data.root_ang_vel_b[:, 2])
+    reward = torch.logical_and(cmd_yaw > command_threshold, body_yaw < yaw_velocity_threshold).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def wheel_spin_when_stuck(
     env: ManagerBasedRLEnv,
     command_name: str,

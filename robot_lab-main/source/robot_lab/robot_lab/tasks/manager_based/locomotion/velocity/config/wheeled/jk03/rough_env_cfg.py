@@ -53,6 +53,12 @@ class JK03RewardsCfg(RewardsCfg):
         params={"command_name": "base_velocity", "command_threshold": 0.35, "velocity_threshold": 0.12},
     )
 
+    yaw_stuck_with_command = RewTerm(
+        func=mdp.yaw_stuck_with_command,
+        weight=0.0,
+        params={"command_name": "base_velocity", "command_threshold": 0.10, "yaw_velocity_threshold": 0.06},
+    )
+
     wheel_spin_when_stuck = RewTerm(
         func=mdp.wheel_spin_when_stuck,
         weight=0.0,
@@ -145,14 +151,16 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.scale = 0.05
-        self.observations.policy.base_lin_vel = None
+        # Keep base velocity visible to the actor for JK03 retraining. The
+        # previous policy received commands but learned actions that barely
+        # moved the heavy body, so this closes that feedback loop.
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = {".*_hipx_joint": 0.125, "^(?!.*_hipx_joint).*": 0.25}
-        self.actions.joint_vel.scale = 5.0
+        self.actions.joint_vel.scale = 8.0
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.leg_joint_names
@@ -192,7 +200,8 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = 0
+        # Keep the heavy body from solving stairs by crouching into edges.
+        self.rewards.base_height_l2.weight = -0.8
         self.rewards.base_height_l2.params["target_height"] = 0.43
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -219,13 +228,15 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.weight = -1.0e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still.weight = -2.0
+        self.rewards.stand_still.params["command_threshold"] = 0.03
         self.rewards.stand_still.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.65
+        self.rewards.joint_pos_penalty.params["command_threshold"] = 0.03
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_mirror.weight = -0.04
+        self.rewards.joint_mirror.weight = -0.06
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["fl_(hipx|hipy|knee).*", "hr_(hipx|hipy|knee).*"],
             ["fr_(hipx|hipy|knee).*", "hl_(hipx|hipy|knee).*"],
@@ -235,21 +246,28 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.action_rate_l2.weight = -0.008
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -2.0
+        self.rewards.undesired_contacts.weight = -3.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
-        self.rewards.contact_forces.weight = -1.5e-4
+        self.rewards.contact_forces.weight = -2.0e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.contact_forces.params["threshold"] = 500.0
-        self.rewards.stuck_with_command.weight = -1.0
-        self.rewards.wheel_spin_when_stuck.weight = -0.001
+        self.rewards.stuck_with_command.weight = -5.0
+        self.rewards.stuck_with_command.params["command_threshold"] = 0.08
+        self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
+        self.rewards.yaw_stuck_with_command.weight = -3.0
+        self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
+        self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
+        self.rewards.wheel_spin_when_stuck.weight = -1.0e-4
+        self.rewards.wheel_spin_when_stuck.params["command_threshold"] = 0.08
+        self.rewards.wheel_spin_when_stuck.params["velocity_threshold"] = 0.08
         self.rewards.wheel_spin_when_stuck.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.wheel_spin_with_lateral_contact.weight = -0.0015
+        self.rewards.wheel_spin_with_lateral_contact.weight = -2.0e-4
         self.rewards.wheel_spin_with_lateral_contact.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 6.0
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.weight = 8.0
+        self.rewards.track_ang_vel_z_exp.weight = 4.0
 
         # Others
         self.rewards.feet_air_time.weight = 0
@@ -259,18 +277,20 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact_without_cmd.weight = 0.1
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_stumble.weight = -0.4
+        self.rewards.feet_stumble.weight = -0.8
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_slide.weight = -0.08
+        self.rewards.feet_slide.weight = -0.15
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height.weight = 0
         self.rewards.feet_height.params["target_height"] = 0.1
         self.rewards.feet_height.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_height_body.weight = 0
-        self.rewards.feet_height_body.params["target_height"] = -0.40
+        # Encourage wheel clearance relative to the body while moving, so the
+        # policy learns to lift over stair edges instead of scraping through.
+        self.rewards.feet_height_body.weight = -1.2
+        self.rewards.feet_height_body.params["target_height"] = -0.32
         self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_gait.weight = 0
+        self.rewards.feet_gait.weight = 0.15
         self.rewards.feet_gait.params["command_threshold"] = 0.08
         self.rewards.feet_gait.params["velocity_threshold"] = 0.15
         self.rewards.feet_gait.params["max_err"] = 0.25
@@ -296,12 +316,14 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             "min_down_distance": 0.25,
             "max_down_distance": 0.8,
         }
-        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.2, 1.0)
-        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.2, 1.0)
+        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
 
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.rel_standing_envs = 0.0
-        self.commands.base_velocity.ranges.lin_vel_x = (0.05, 0.9)
+        # Include a conservative reverse range so keyboard/play and PPO both
+        # learn what a negative x-velocity command means.
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.35, 0.9)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.heading = (-0.5, 0.5)
