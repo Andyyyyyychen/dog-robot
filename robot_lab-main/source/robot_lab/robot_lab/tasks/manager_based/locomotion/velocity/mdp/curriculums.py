@@ -20,13 +20,6 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-def _episode_term_average(env: ManagerBasedRLEnv, term_name: str, env_ids: Sequence[int]) -> torch.Tensor | None:
-    """Return the per-second episode average for a reward term when it exists."""
-    if not term_name or term_name not in env.reward_manager._episode_sums:
-        return None
-    return env.reward_manager._episode_sums[term_name][env_ids] / env.max_episode_length_s
-
-
 def terrain_levels_jk03_stairs(
     env: ManagerBasedRLEnv,
     env_ids: Sequence[int],
@@ -37,26 +30,11 @@ def terrain_levels_jk03_stairs(
     max_up_distance: float = 2.4,
     min_down_distance: float = 0.25,
     max_down_distance: float = 0.8,
-    reward_term_name: str = "stair_upward_progress",
-    min_upward_reward: float = 0.035,
-    progress_term_name: str = "commanded_motion_progress",
-    min_progress_reward: float = 0.08,
-    max_move_up_penalty_terms: dict[str, float] | None = None,
-    move_down_penalty_terms: dict[str, float] | None = None,
-    min_down_upward_reward: float | None = None,
-    forward_command_threshold: float = 0.08,
 ) -> torch.Tensor:
-    """Terrain curriculum tuned for slow stair climbing.
-
-    JK03 can move across rough terrain without actually climbing a stair.  Gate
-    upward curriculum progress with stair progress and contact-quality rewards
-    so terrain levels do not rise only because the robot covered xy distance.
-    """
+    """Terrain curriculum tuned for slow stair climbing."""
     asset = env.scene[asset_cfg.name]
     terrain = env.scene.terrain
-    base_velocity_command = env.command_manager.get_command("base_velocity")[env_ids]
-    command_xy = torch.linalg.norm(base_velocity_command[:, :2], dim=1)
-    forward_commanded = base_velocity_command[:, 0] > forward_command_threshold
+    command_xy = torch.linalg.norm(env.command_manager.get_command("base_velocity")[env_ids, :2], dim=1)
 
     distance = torch.linalg.norm(asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1)
     expected_distance = command_xy * env.max_episode_length_s
@@ -66,28 +44,7 @@ def terrain_levels_jk03_stairs(
     )
 
     move_up = distance > move_up_distance
-    upward_reward = _episode_term_average(env, reward_term_name, env_ids)
-    if upward_reward is not None:
-        move_up *= upward_reward > min_upward_reward
-    progress_reward = _episode_term_average(env, progress_term_name, env_ids)
-    if progress_reward is not None:
-        move_up *= progress_reward > min_progress_reward
-    if max_move_up_penalty_terms is not None:
-        for term_name, max_penalty in max_move_up_penalty_terms.items():
-            penalty = _episode_term_average(env, term_name, env_ids)
-            if penalty is not None:
-                move_up *= penalty > -abs(max_penalty)
-
     move_down = distance < move_down_distance
-    bad_forward_stair_behavior = torch.zeros_like(move_down)
-    if min_down_upward_reward is not None and upward_reward is not None:
-        bad_forward_stair_behavior |= upward_reward < min_down_upward_reward
-    if move_down_penalty_terms is not None:
-        for term_name, max_penalty in move_down_penalty_terms.items():
-            penalty = _episode_term_average(env, term_name, env_ids)
-            if penalty is not None:
-                bad_forward_stair_behavior |= penalty < -abs(max_penalty)
-    move_down |= bad_forward_stair_behavior & forward_commanded
     move_down *= ~move_up
 
     terrain.update_env_origins(env_ids, move_up, move_down)

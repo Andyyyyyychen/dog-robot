@@ -160,7 +160,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = JK03_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.max_init_terrain_level = 0
+        self.scene.terrain.max_init_terrain_level = 1
         terrain_generator = self.scene.terrain.terrain_generator
         if terrain_generator is not None and terrain_generator.sub_terrains is not None:
             stair_training_proportions = {
@@ -179,9 +179,9 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                     continue
                 stair_cfg = terrain_generator.sub_terrains[terrain_name]
                 if hasattr(stair_cfg, "step_height_range"):
-                    stair_cfg.step_height_range = (0.01, 0.06)
+                    stair_cfg.step_height_range = (0.02, 0.10)
                 if hasattr(stair_cfg, "step_width"):
-                    stair_cfg.step_width = 0.60
+                    stair_cfg.step_width = 0.45
                 if hasattr(stair_cfg, "platform_width"):
                     stair_cfg.platform_width = 2.2
 
@@ -311,11 +311,11 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_with_lateral_contact.weight = -2.0e-4
         self.rewards.wheel_spin_with_lateral_contact.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.commanded_motion_progress.weight = 1.5
-        self.rewards.stair_upward_progress.weight = 3.0
-        self.rewards.wheel_spin_without_progress.weight = -0.04
+        self.rewards.commanded_motion_progress.weight = 1.2
+        self.rewards.stair_upward_progress.weight = 1.0
+        self.rewards.wheel_spin_without_progress.weight = -0.03
         self.rewards.wheel_spin_without_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.wheel_lateral_edge_contact.weight = -0.12
+        self.rewards.wheel_lateral_edge_contact.weight = -0.08
         self.rewards.wheel_lateral_edge_contact.params["sensor_cfg"].body_names = self.foot_link_name
 
         # Velocity-tracking rewards
@@ -340,8 +340,8 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height.params["asset_cfg"].body_names = [self.foot_link_name]
         # Encourage wheel clearance relative to the body while moving, so the
         # policy learns to lift over stair edges instead of scraping through.
-        self.rewards.feet_height_body.weight = -0.8
-        self.rewards.feet_height_body.params["target_height"] = -0.30
+        self.rewards.feet_height_body.weight = -1.2
+        self.rewards.feet_height_body.params["target_height"] = -0.32
         self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.15
         self.rewards.feet_gait.params["command_threshold"] = 0.08
@@ -362,32 +362,15 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.curriculum.terrain_levels.func = mdp.terrain_levels_jk03_stairs
         self.curriculum.terrain_levels.params = {
             "asset_cfg": SceneEntityCfg("robot"),
-            "up_command_scale": 0.75,
-            "down_command_scale": 0.22,
-            "min_up_distance": 1.8,
-            "max_up_distance": 3.0,
-            "min_down_distance": 0.35,
-            "max_down_distance": 1.0,
-            "reward_term_name": "stair_upward_progress",
-            "min_upward_reward": 0.14,
-            "progress_term_name": "commanded_motion_progress",
-            "min_progress_reward": 0.12,
-            "max_move_up_penalty_terms": {
-                "undesired_contacts": 0.22,
-                "feet_stumble": 0.04,
-                "wheel_lateral_edge_contact": 0.03,
-                "stuck_with_command": 0.12,
-            },
-            "move_down_penalty_terms": {
-                "undesired_contacts": 0.60,
-                "feet_stumble": 0.08,
-                "wheel_lateral_edge_contact": 0.06,
-                "stuck_with_command": 0.16,
-            },
-            "min_down_upward_reward": 0.07,
+            "up_command_scale": 0.55,
+            "down_command_scale": 0.18,
+            "min_up_distance": 1.2,
+            "max_up_distance": 2.4,
+            "min_down_distance": 0.25,
+            "max_down_distance": 0.8,
         }
-        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.25, 0.60)
-        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.4, 0.8)
+        self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
 
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.rel_standing_envs = 0.0
