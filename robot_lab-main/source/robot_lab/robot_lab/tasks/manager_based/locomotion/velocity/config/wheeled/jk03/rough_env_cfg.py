@@ -359,16 +359,6 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact.params["threshold"] = 20.0
 
         # ------------------------------Curriculums------------------------------
-        self.curriculum.terrain_levels.func = mdp.terrain_levels_jk03_stairs
-        self.curriculum.terrain_levels.params = {
-            "asset_cfg": SceneEntityCfg("robot"),
-            "up_command_scale": 0.55,
-            "down_command_scale": 0.18,
-            "min_up_distance": 1.2,
-            "max_up_distance": 2.4,
-            "min_down_distance": 0.25,
-            "max_down_distance": 0.8,
-        }
         self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
         self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
 
