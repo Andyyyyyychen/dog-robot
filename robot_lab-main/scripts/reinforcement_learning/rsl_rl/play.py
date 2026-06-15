@@ -222,6 +222,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.scene.terrain.terrain_generator.num_cols = 5
         env_cfg.scene.terrain.terrain_generator.curriculum = False
 
+    trained_lin_vel_multiplier = 1.0
+    trained_ang_vel_multiplier = 1.0
+    if env_cfg.curriculum.command_levels_lin_vel is not None:
+        range_multiplier = env_cfg.curriculum.command_levels_lin_vel.params.get("range_multiplier", None)
+        if range_multiplier is not None:
+            trained_lin_vel_multiplier = float(range_multiplier[1])
+    if env_cfg.curriculum.command_levels_ang_vel is not None:
+        range_multiplier = env_cfg.curriculum.command_levels_ang_vel.params.get("range_multiplier", None)
+        if range_multiplier is not None:
+            trained_ang_vel_multiplier = float(range_multiplier[1])
+
     # disable randomization for play
     env_cfg.observations.policy.enable_corruption = False
     # remove random pushing
@@ -256,24 +267,39 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.curriculum.terrain_levels = None
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
-        keyboard_yaw_sensitivity = 0.45 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1]
+        keyboard_x_sensitivity = env_cfg.commands.base_velocity.ranges.lin_vel_x[1] * trained_lin_vel_multiplier
+        keyboard_y_sensitivity = env_cfg.commands.base_velocity.ranges.lin_vel_y[1] * trained_lin_vel_multiplier
+        keyboard_yaw_sensitivity = 0.45 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1] * trained_ang_vel_multiplier
+        keyboard_x_range = (
+            min(0.0, env_cfg.commands.base_velocity.ranges.lin_vel_x[0] * trained_lin_vel_multiplier),
+            keyboard_x_sensitivity,
+        )
+        keyboard_y_range = (
+            env_cfg.commands.base_velocity.ranges.lin_vel_y[0] * trained_lin_vel_multiplier,
+            keyboard_y_sensitivity,
+        )
+        keyboard_yaw_range = (
+            env_cfg.commands.base_velocity.ranges.ang_vel_z[0] * trained_ang_vel_multiplier,
+            env_cfg.commands.base_velocity.ranges.ang_vel_z[1] * trained_ang_vel_multiplier,
+        )
         config = Se2KeyboardCfg(
-            v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
-            v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
+            v_x_sensitivity=keyboard_x_sensitivity,
+            v_y_sensitivity=keyboard_y_sensitivity,
             omega_z_sensitivity=keyboard_yaw_sensitivity,
         )
         controller = Se2Keyboard(config)
-        add_keyboard_fallback_keys(controller, env_cfg.commands.base_velocity.ranges.lin_vel_x[1], keyboard_yaw_sensitivity)
-        lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
+        add_keyboard_fallback_keys(controller, keyboard_x_sensitivity, keyboard_yaw_sensitivity)
+        lin_vel_y_range = keyboard_y_range
         if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
             map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
         command_clip = {
-            "x": (min(0.0, env_cfg.commands.base_velocity.ranges.lin_vel_x[0]), env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
-            "y": env_cfg.commands.base_velocity.ranges.lin_vel_y,
-            "yaw": env_cfg.commands.base_velocity.ranges.ang_vel_z,
+            "x": keyboard_x_range,
+            "y": keyboard_y_range,
+            "yaw": keyboard_yaw_range,
         }
         print(
             "[KEYBOARD] Debug enabled. Click the Isaac Sim viewport, then press arrow keys. "
+            f"Command clip x={command_clip['x']}, yaw={command_clip['yaw']}. "
             "Expected nonzero vx/yaw values will print here.",
             flush=True,
         )
