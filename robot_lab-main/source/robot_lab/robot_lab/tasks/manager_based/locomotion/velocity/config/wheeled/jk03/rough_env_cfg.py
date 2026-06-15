@@ -100,8 +100,39 @@ class JK03RewardsCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "command_threshold": 0.08,
-            "max_forward_step": 0.05,
-            "max_up_step": 0.03,
+            "max_forward_step": 0.30,
+            "max_up_step": 0.09,
+            "min_forward_step": 0.08,
+            "min_up_step": 0.025,
+            "window_steps": 30,
+            "forward_weight": 0.0,
+            "coupled_weight": 0.85,
+            "upward_weight": 0.15,
+            "min_forward_fraction": 0.30,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    upward_without_forward_progress = RewTerm(
+        func=mdp.upward_without_forward_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_up_step": 0.09,
+            "min_forward_step": 0.08,
+            "window_steps": 30,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    vertical_bounce_without_progress = RewTerm(
+        func=mdp.vertical_bounce_without_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "velocity_threshold": 0.12,
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
@@ -127,6 +158,21 @@ class JK03RewardsCfg(RewardsCfg):
             "min_lateral_force_ratio": 1.2,
             "max_lateral_force_ratio": 2.8,
             "vertical_force_eps": 5.0,
+        },
+    )
+
+    wheel_clearance_on_command = RewTerm(
+        func=mdp.wheel_clearance_on_command,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "min_height": -0.34,
+            "target_height": -0.24,
+            "tanh_mult": 2.0,
+            "forward_velocity_threshold": 0.08,
+            "min_progress_scale": 0.35,
+            "asset_cfg": SceneEntityCfg("robot", body_names=""),
         },
     )
 
@@ -244,11 +290,11 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = 0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.ang_vel_xy_l2.weight = -0.05
+        self.rewards.lin_vel_z_l2.weight = -0.7
+        self.rewards.ang_vel_xy_l2.weight = -0.08
         self.rewards.flat_orientation_l2.weight = 0
         # Keep the heavy body from solving stairs by crouching into edges.
-        self.rewards.base_height_l2.weight = -0.8
+        self.rewards.base_height_l2.weight = -0.30
         self.rewards.base_height_l2.params["target_height"] = 0.43
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -267,7 +313,7 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_acc_wheel_l2.weight = -2.5e-9
         self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_hipx_l1", -0.12, [".*_hipx_joint"])
+        self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_hipx_l1", -0.16, [".*_hipx_joint"])
         self.rewards.joint_pos_limits.weight = -5.0
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_limits.weight = 0
@@ -277,13 +323,13 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still.weight = -2.0
         self.rewards.stand_still.params["command_threshold"] = 0.03
         self.rewards.stand_still.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.65
+        self.rewards.joint_pos_penalty.weight = -0.45
         self.rewards.joint_pos_penalty.params["command_threshold"] = 0.03
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_mirror.weight = -0.06
+        self.rewards.joint_mirror.weight = -0.08
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["fl_(hipx|hipy|knee).*", "hr_(hipx|hipy|knee).*"],
             ["fr_(hipx|hipy|knee).*", "hl_(hipx|hipy|knee).*"],
@@ -298,10 +344,10 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.weight = -2.0e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.contact_forces.params["threshold"] = 500.0
-        self.rewards.stuck_with_command.weight = -5.0
+        self.rewards.stuck_with_command.weight = -3.5
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
-        self.rewards.yaw_stuck_with_command.weight = -3.0
+        self.rewards.yaw_stuck_with_command.weight = -2.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.rewards.wheel_spin_when_stuck.weight = -1.0e-4
@@ -312,11 +358,15 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_with_lateral_contact.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.commanded_motion_progress.weight = 1.2
-        self.rewards.stair_upward_progress.weight = 1.0
-        self.rewards.wheel_spin_without_progress.weight = -0.03
+        self.rewards.stair_upward_progress.weight = 3.0
+        self.rewards.upward_without_forward_progress.weight = -1.0
+        self.rewards.vertical_bounce_without_progress.weight = -0.35
+        self.rewards.wheel_spin_without_progress.weight = -0.05
         self.rewards.wheel_spin_without_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.wheel_lateral_edge_contact.weight = -0.08
+        self.rewards.wheel_lateral_edge_contact.weight = -0.06
         self.rewards.wheel_lateral_edge_contact.params["sensor_cfg"].body_names = self.foot_link_name
+        self.rewards.wheel_clearance_on_command.weight = 1.6
+        self.rewards.wheel_clearance_on_command.params["asset_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 8.0
@@ -330,9 +380,9 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact_without_cmd.weight = 0.1
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_stumble.weight = -0.8
+        self.rewards.feet_stumble.weight = -0.35
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_slide.weight = -0.15
+        self.rewards.feet_slide.weight = -0.16
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height.weight = 0
@@ -340,10 +390,10 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height.params["asset_cfg"].body_names = [self.foot_link_name]
         # Encourage wheel clearance relative to the body while moving, so the
         # policy learns to lift over stair edges instead of scraping through.
-        self.rewards.feet_height_body.weight = -1.2
-        self.rewards.feet_height_body.params["target_height"] = -0.32
+        self.rewards.feet_height_body.weight = -0.08
+        self.rewards.feet_height_body.params["target_height"] = -0.30
         self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_gait.weight = 0.15
+        self.rewards.feet_gait.weight = 0.22
         self.rewards.feet_gait.params["command_threshold"] = 0.08
         self.rewards.feet_gait.params["velocity_threshold"] = 0.15
         self.rewards.feet_gait.params["max_err"] = 0.25

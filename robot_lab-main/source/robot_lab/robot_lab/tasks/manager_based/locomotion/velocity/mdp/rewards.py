@@ -279,6 +279,52 @@ def _root_step_delta(
     return delta_w, delta_b
 
 
+def _root_window_delta(
+    env: ManagerBasedRLEnv,
+    asset: RigidObject,
+    cache_name: str,
+    window_steps: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute root displacement over a short rolling window."""
+    window_steps = max(int(window_steps), 1)
+    current_root_pos = asset.data.root_pos_w[:, :3]
+    pos_cache_name = f"{cache_name}_root_pos_w"
+    counter_cache_name = f"{cache_name}_counter"
+
+    if (
+        not hasattr(env, pos_cache_name)
+        or getattr(env, pos_cache_name).shape != current_root_pos.shape
+        or not hasattr(env, counter_cache_name)
+        or getattr(env, counter_cache_name).shape[0] != env.num_envs
+    ):
+        setattr(env, pos_cache_name, current_root_pos.detach().clone())
+        setattr(env, counter_cache_name, torch.zeros(env.num_envs, device=env.device, dtype=torch.long))
+        zeros = torch.zeros_like(current_root_pos)
+        return zeros, zeros
+
+    previous_root_pos = getattr(env, pos_cache_name)
+    counter = getattr(env, counter_cache_name)
+    if hasattr(env, "episode_length_buf") and env.episode_length_buf is not None:
+        reset_envs = env.episode_length_buf <= 1
+        previous_root_pos = torch.where(reset_envs.unsqueeze(1), current_root_pos, previous_root_pos)
+        counter = torch.where(reset_envs, torch.zeros_like(counter), counter)
+    else:
+        reset_envs = None
+
+    delta_w = current_root_pos - previous_root_pos
+    delta_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), delta_w)
+    if reset_envs is not None:
+        delta_w = torch.where(reset_envs.unsqueeze(1), torch.zeros_like(delta_w), delta_w)
+        delta_b = torch.where(reset_envs.unsqueeze(1), torch.zeros_like(delta_b), delta_b)
+
+    update_envs = counter >= window_steps
+    next_root_pos = torch.where(update_envs.unsqueeze(1), current_root_pos, previous_root_pos)
+    next_counter = torch.where(update_envs, torch.zeros_like(counter), counter + 1)
+    setattr(env, pos_cache_name, next_root_pos.detach().clone())
+    setattr(env, counter_cache_name, next_counter.detach().clone())
+    return delta_w, delta_b
+
+
 def commanded_motion_progress(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -309,19 +355,77 @@ def stair_upward_progress(
     command_threshold: float,
     max_forward_step: float,
     max_up_step: float,
+    min_forward_step: float = 0.0,
+    min_up_step: float = 0.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    window_steps: int = 10,
+    forward_weight: float = 0.0,
+    coupled_weight: float = 0.85,
+    upward_weight: float = 0.15,
+    min_forward_fraction: float = 0.15,
+) -> torch.Tensor:
+    """Reward stable forward progress that also gains height on stair-like terrain."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    delta_w, delta_b = _root_window_delta(env, asset, "_stair_upward_progress", window_steps)
+    forward_command = env.command_manager.get_command(command_name)[:, 0]
+    forward_span = max(max_forward_step - min_forward_step, 1.0e-6)
+    upward_span = max(max_up_step - min_up_step, 1.0e-6)
+    forward_progress = torch.clamp((delta_b[:, 0] - min_forward_step) / forward_span, min=0.0, max=1.0)
+    upward_progress = torch.clamp((delta_w[:, 2] - min_up_step) / upward_span, min=0.0, max=1.0)
+
+    coupled_progress = torch.clamp(forward_progress * upward_progress, min=0.0)
+    smooth_coupled_progress = torch.sqrt(coupled_progress)
+    forward_gate = torch.clamp(forward_progress / max(min_forward_fraction, 1.0e-6), min=0.0, max=1.0)
+    gated_upward_progress = upward_progress * forward_gate
+    weight_sum = max(forward_weight + coupled_weight + upward_weight, 1.0e-6)
+    reward = (
+        forward_weight * forward_progress
+        + coupled_weight * smooth_coupled_progress
+        + upward_weight * gated_upward_progress
+    ) / weight_sum
+    reward *= (forward_command > command_threshold).float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def upward_without_forward_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_up_step: float,
+    min_forward_step: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    window_steps: int = 30,
+) -> torch.Tensor:
+    """Penalize gaining height without enough net forward progress.
+
+    This prevents the policy from scoring stair rewards by bouncing the body,
+    pitching into an edge, or being squeezed upward while not actually climbing.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    delta_w, delta_b = _root_window_delta(env, asset, "_upward_without_forward_progress", window_steps)
+    forward_command = env.command_manager.get_command(command_name)[:, 0]
+    upward_progress = torch.clamp(delta_w[:, 2] / max(max_up_step, 1.0e-6), min=0.0, max=1.0)
+    missing_forward = torch.clamp((min_forward_step - delta_b[:, 0]) / max(min_forward_step, 1.0e-6), min=0.0, max=1.0)
+    reward = upward_progress * missing_forward
+    reward *= (forward_command > command_threshold).float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def vertical_bounce_without_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    velocity_threshold: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Reward forward progress that also gains height on stair-like terrain."""
+    """Penalize vertical bouncing when forward commands are not producing progress."""
     asset: RigidObject = env.scene[asset_cfg.name]
-    delta_w, delta_b = _root_step_delta(env, asset, "_stair_upward_progress_prev_root_pos_w")
     forward_command = env.command_manager.get_command(command_name)[:, 0]
-    forward_progress = torch.clamp(delta_b[:, 0] / max_forward_step, min=0.0, max=1.0)
-    upward_progress = torch.clamp(delta_w[:, 2] / max_up_step, min=0.0, max=1.0)
-
-    # The geometric mean makes pure jumping and pure sliding less attractive
-    # than moving forward while gaining height.
-    coupled_upward = torch.sqrt(torch.clamp(forward_progress * upward_progress, min=0.0))
-    reward = 0.35 * forward_progress + 0.65 * coupled_upward
+    forward_speed = asset.data.root_lin_vel_b[:, 0]
+    no_progress_scale = torch.clamp((velocity_threshold - forward_speed) / velocity_threshold, min=0.0, max=1.0)
+    reward = torch.abs(asset.data.root_lin_vel_b[:, 2]) * no_progress_scale
     reward *= (forward_command > command_threshold).float()
     reward *= _upright_scale(env)
     return reward
@@ -366,6 +470,48 @@ def wheel_lateral_edge_contact(
     lateral_ratio = forces_xy / torch.clamp(forces_z, min=vertical_force_eps)
     edge_excess = torch.clamp(lateral_ratio - adaptive_ratio.unsqueeze(1), min=0.0, max=3.0)
     reward = torch.sum(edge_excess, dim=1)
+    reward *= _upright_scale(env)
+    return reward
+
+
+def wheel_clearance_on_command(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    command_threshold: float,
+    min_height: float,
+    target_height: float,
+    tanh_mult: float,
+    forward_velocity_threshold: float = 0.08,
+    min_progress_scale: float = 0.35,
+) -> torch.Tensor:
+    """Reward commanded motion with wheels lifted in the body frame.
+
+    The reward is bounded to 0..1 and only active while commands are present.
+    It gives the policy a direct stair-climbing hint: lift wheels above the
+    normal rolling height while they are moving, instead of scraping stair edges.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    foot_pos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    foot_vel_translated = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[
+        :, :
+    ].unsqueeze(1)
+
+    foot_pos_b = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
+    foot_vel_b = torch.zeros_like(foot_pos_b)
+    for i in range(len(asset_cfg.body_ids)):
+        foot_pos_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
+        foot_vel_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_vel_translated[:, i, :])
+
+    height_span = max(target_height - min_height, 1.0e-6)
+    clearance = torch.clamp((foot_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
+    swing_scale = torch.tanh(tanh_mult * torch.linalg.norm(foot_vel_b[:, :, :2], dim=2))
+    forward_speed_scale = torch.clamp(asset.data.root_lin_vel_b[:, 0] / forward_velocity_threshold, min=0.0, max=1.0)
+    progress_scale = min_progress_scale + (1.0 - min_progress_scale) * forward_speed_scale
+    reward = torch.mean(clearance * swing_scale, dim=1) * progress_scale
+
+    command = env.command_manager.get_command(command_name)
+    reward *= (command[:, 0] > command_threshold).float()
     reward *= _upright_scale(env)
     return reward
 

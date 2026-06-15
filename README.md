@@ -8,13 +8,23 @@ JK03 轮足机器狗仿真与强化学习训练仓库。
 - `rl_sar-main`：本地 MuJoCo 手动仿真入口，用来先看 JK03 模型、关节、轮子和场景。
 - `robot_lab-main/scripts/tools/check_jk03_pretrain.py`：训练前检查脚本，用来核对 JK03 文件、URDF、网格、Gym 环境注册和 MuJoCo 参数镜像。
 
-注意：不要直接修改 JK03 初始数据和参数。受保护路径包括：
+修改记录见：
+
+```text
+JK03_CHANGELOG.md
+```
+
+以后每次修改训练代码、reward、PPO 或测试工具，都必须同步更新 `JK03_CHANGELOG.md`，说明为什么改、改了哪些文件、怎么改、没有改什么、验证结果和后续风险。
+
+注意：不要直接修改 JK03 初始数据、URDF 和 terrain curriculum。受保护内容包括：
 
 ```text
 robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py
-robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/
 robot_lab-main/source/robot_lab/data/Robots/jk03/
+robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/velocity_env_cfg.py 中的 terrain_levels_vel
 ```
+
+JK03 reward 配置可以根据训练结果调整，但必须写入 `JK03_CHANGELOG.md`，并且不能覆盖 fan-ziqi 原始 terrain level 算法。
 
 ## 1. 拉取仓库
 
