@@ -83,6 +83,53 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    commanded_motion_progress = RewTerm(
+        func=mdp.commanded_motion_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_progress": 0.04,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    stair_upward_progress = RewTerm(
+        func=mdp.stair_upward_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_forward_step": 0.05,
+            "max_up_step": 0.03,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    wheel_spin_without_progress = RewTerm(
+        func=mdp.wheel_spin_without_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "velocity_threshold": 0.08,
+            "wheel_speed_threshold": 2.0,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
+    wheel_lateral_edge_contact = RewTerm(
+        func=mdp.wheel_lateral_edge_contact,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "base_lateral_force_ratio": 1.8,
+            "min_lateral_force_ratio": 1.2,
+            "max_lateral_force_ratio": 2.8,
+            "vertical_force_eps": 5.0,
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
@@ -264,6 +311,12 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_with_lateral_contact.weight = -2.0e-4
         self.rewards.wheel_spin_with_lateral_contact.params["sensor_cfg"].body_names = self.foot_link_name
         self.rewards.wheel_spin_with_lateral_contact.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.commanded_motion_progress.weight = 1.2
+        self.rewards.stair_upward_progress.weight = 1.0
+        self.rewards.wheel_spin_without_progress.weight = -0.03
+        self.rewards.wheel_spin_without_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.wheel_lateral_edge_contact.weight = -0.08
+        self.rewards.wheel_lateral_edge_contact.params["sensor_cfg"].body_names = self.foot_link_name
 
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 8.0

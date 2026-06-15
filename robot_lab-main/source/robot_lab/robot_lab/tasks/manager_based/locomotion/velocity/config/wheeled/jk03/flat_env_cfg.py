@@ -60,6 +60,10 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.rewards.wheel_spin_when_stuck.weight = 0
         self.rewards.wheel_spin_with_lateral_contact.weight = 0
+        self.rewards.commanded_motion_progress.weight = 1.0
+        self.rewards.stair_upward_progress.weight = 0
+        self.rewards.wheel_spin_without_progress.weight = -0.02
+        self.rewards.wheel_lateral_edge_contact.weight = 0
 
         self.rewards.stand_still.params["command_threshold"] = 0.03
         self.rewards.joint_pos_penalty.params["command_threshold"] = 0.03

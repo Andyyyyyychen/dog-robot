@@ -247,6 +247,129 @@ def wheel_spin_with_lateral_contact(
     return reward
 
 
+def _upright_scale(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Return a 0..1 scale that fades rewards out when the base tips over."""
+    return torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+
+
+def _root_step_delta(
+    env: ManagerBasedRLEnv, asset: RigidObject, cache_name: str
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute root displacement since the previous reward call in world and yaw frames."""
+    current_root_pos = asset.data.root_pos_w[:, :3]
+    if not hasattr(env, cache_name) or getattr(env, cache_name).shape != current_root_pos.shape:
+        setattr(env, cache_name, current_root_pos.detach().clone())
+        zeros = torch.zeros_like(current_root_pos)
+        return zeros, zeros
+
+    previous_root_pos = getattr(env, cache_name)
+    if hasattr(env, "episode_length_buf") and env.episode_length_buf is not None:
+        reset_envs = env.episode_length_buf <= 1
+        previous_root_pos = torch.where(reset_envs.unsqueeze(1), current_root_pos, previous_root_pos)
+    else:
+        reset_envs = None
+
+    delta_w = current_root_pos - previous_root_pos
+    delta_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), delta_w)
+    if reset_envs is not None:
+        delta_w = torch.where(reset_envs.unsqueeze(1), torch.zeros_like(delta_w), delta_w)
+        delta_b = torch.where(reset_envs.unsqueeze(1), torch.zeros_like(delta_b), delta_b)
+
+    setattr(env, cache_name, current_root_pos.detach().clone())
+    return delta_w, delta_b
+
+
+def commanded_motion_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_progress: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward real displacement in the commanded xy direction.
+
+    Velocity tracking alone can look good while the robot is pinned against a
+    stair edge. This term asks for actual per-step translation in the requested
+    direction, including reverse commands.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    _, delta_b = _root_step_delta(env, asset, "_commanded_motion_progress_prev_root_pos_w")
+    command_xy = env.command_manager.get_command(command_name)[:, :2]
+    command_norm = torch.linalg.norm(command_xy, dim=1)
+    projected_progress = torch.sum(delta_b[:, :2] * command_xy, dim=1) / torch.clamp(command_norm, min=1.0e-6)
+    reward = torch.clamp(projected_progress / max_progress, min=0.0, max=1.0)
+    reward *= (command_norm > command_threshold).float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def stair_upward_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_forward_step: float,
+    max_up_step: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward forward progress that also gains height on stair-like terrain."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    delta_w, delta_b = _root_step_delta(env, asset, "_stair_upward_progress_prev_root_pos_w")
+    forward_command = env.command_manager.get_command(command_name)[:, 0]
+    forward_progress = torch.clamp(delta_b[:, 0] / max_forward_step, min=0.0, max=1.0)
+    upward_progress = torch.clamp(delta_w[:, 2] / max_up_step, min=0.0, max=1.0)
+
+    # The geometric mean makes pure jumping and pure sliding less attractive
+    # than moving forward while gaining height.
+    coupled_upward = torch.sqrt(torch.clamp(forward_progress * upward_progress, min=0.0))
+    reward = 0.35 * forward_progress + 0.65 * coupled_upward
+    reward *= (forward_command > command_threshold).float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def wheel_spin_without_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    velocity_threshold: float,
+    wheel_speed_threshold: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize fast wheel spinning while commanded translation is not happening."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command_xy = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    body_vel_xy = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    wheel_speed = torch.mean(torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
+    stuck_scale = torch.clamp((velocity_threshold - body_vel_xy) / velocity_threshold, min=0.0, max=1.0)
+    spin_excess = torch.clamp(wheel_speed - wheel_speed_threshold, min=0.0)
+    reward = spin_excess * stuck_scale
+    reward *= (command_xy > command_threshold).float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def wheel_lateral_edge_contact(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    base_lateral_force_ratio: float,
+    min_lateral_force_ratio: float,
+    max_lateral_force_ratio: float,
+    vertical_force_eps: float,
+) -> torch.Tensor:
+    """Penalize wheel contacts that mostly push sideways into vertical edges."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
+    forces_xy = torch.linalg.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
+    adaptive_ratio = adaptive_lateral_force_ratio(
+        forces_z, base_lateral_force_ratio, min_lateral_force_ratio, max_lateral_force_ratio, vertical_force_eps
+    )
+    lateral_ratio = forces_xy / torch.clamp(forces_z, min=vertical_force_eps)
+    edge_excess = torch.clamp(lateral_ratio - adaptive_ratio.unsqueeze(1), min=0.0, max=3.0)
+    reward = torch.sum(edge_excess, dim=1)
+    reward *= _upright_scale(env)
+    return reward
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 
