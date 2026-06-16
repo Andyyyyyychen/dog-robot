@@ -670,6 +670,45 @@ def yaw_turn_feet_clearance(
     return reward
 
 
+def yaw_turn_diagonal_step(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]],
+    min_air_time: float,
+    min_contact_time: float,
+    phase_balance_weight: float,
+) -> torch.Tensor:
+    """Reward diagonal swing/support phases during near-in-place yaw turns."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    pair_0 = list(contact_sensor.find_bodies(synced_feet_pair_names[0])[0])
+    pair_1 = list(contact_sensor.find_bodies(synced_feet_pair_names[1])[0])
+    body_ids = pair_0 + pair_1
+    air_time = contact_sensor.data.current_air_time[:, body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, body_ids]
+
+    pair_0_air = torch.mean((air_time[:, 0:2] > min_air_time).float(), dim=1)
+    pair_1_air = torch.mean((air_time[:, 2:4] > min_air_time).float(), dim=1)
+    pair_0_contact = torch.mean((contact_time[:, 0:2] > min_contact_time).float(), dim=1)
+    pair_1_contact = torch.mean((contact_time[:, 2:4] > min_contact_time).float(), dim=1)
+
+    pair_0_swing = pair_0_air * pair_1_contact
+    pair_1_swing = pair_1_air * pair_0_contact
+    diagonal_phase = torch.maximum(pair_0_swing, pair_1_swing)
+    phase_balance = torch.clamp(torch.abs(pair_0_air - pair_1_air), min=0.0, max=1.0)
+    reward = diagonal_phase * (phase_balance_weight + (1.0 - phase_balance_weight) * phase_balance)
+    reward *= active_command.float()
+    reward *= _upright_scale(env)
+    return reward
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 

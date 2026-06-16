@@ -251,6 +251,21 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_turn_diagonal_step = RewTerm(
+        func=mdp.yaw_turn_diagonal_step,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "synced_feet_pair_names": (("", ""), ("", "")),
+            "min_air_time": 0.025,
+            "min_contact_time": 0.015,
+            "phase_balance_weight": 0.35,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):

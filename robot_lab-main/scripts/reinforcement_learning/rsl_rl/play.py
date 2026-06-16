@@ -168,32 +168,29 @@ def get_agent_cfg_dict(agent_cfg) -> dict:
     return agent_cfg_dict
 
 
-def map_lateral_arrows_to_yaw(controller: Se2Keyboard, yaw_sensitivity: float):
-    """Use arrow-left/right as yaw commands when the task does not train lateral velocity."""
-    key_mapping = getattr(controller, "_INPUT_KEY_MAPPING", None)
-    if key_mapping is None:
-        return
-    key_mapping["LEFT"] = np.asarray([0.0, 0.0, yaw_sensitivity])
-    key_mapping["RIGHT"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
-
-
-def add_keyboard_fallback_keys(controller: Se2Keyboard, x_sensitivity: float, yaw_sensitivity: float):
-    """Add WASD/QE fallbacks for remote desktops that do not forward arrow keys."""
+def set_keyboard_command_mapping(
+    controller: Se2Keyboard, x_sensitivity: float, y_sensitivity: float, yaw_sensitivity: float
+):
+    """Use arrows for translation and Z/X for yaw-rate commands."""
     key_mapping = getattr(controller, "_INPUT_KEY_MAPPING", None)
     if key_mapping is None:
         return
     key_mapping["UP"] = np.asarray([x_sensitivity, 0.0, 0.0])
     key_mapping["DOWN"] = np.asarray([-x_sensitivity, 0.0, 0.0])
+    key_mapping["LEFT"] = np.asarray([0.0, y_sensitivity, 0.0])
+    key_mapping["RIGHT"] = np.asarray([0.0, -y_sensitivity, 0.0])
     key_mapping["W"] = np.asarray([x_sensitivity, 0.0, 0.0])
     key_mapping["S"] = np.asarray([-x_sensitivity, 0.0, 0.0])
-    key_mapping["A"] = np.asarray([0.0, 0.0, yaw_sensitivity])
-    key_mapping["D"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+    key_mapping["A"] = np.asarray([0.0, y_sensitivity, 0.0])
+    key_mapping["D"] = np.asarray([0.0, -y_sensitivity, 0.0])
+    key_mapping["Z"] = np.asarray([0.0, 0.0, yaw_sensitivity])
+    key_mapping["X"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
     key_mapping["Q"] = np.asarray([0.0, 0.0, yaw_sensitivity])
     key_mapping["E"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
     key_mapping["NUMPAD_8"] = np.asarray([x_sensitivity, 0.0, 0.0])
     key_mapping["NUMPAD_2"] = np.asarray([-x_sensitivity, 0.0, 0.0])
-    key_mapping["NUMPAD_4"] = np.asarray([0.0, 0.0, yaw_sensitivity])
-    key_mapping["NUMPAD_6"] = np.asarray([0.0, 0.0, -yaw_sensitivity])
+    key_mapping["NUMPAD_4"] = np.asarray([0.0, y_sensitivity, 0.0])
+    key_mapping["NUMPAD_6"] = np.asarray([0.0, -y_sensitivity, 0.0])
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -256,17 +253,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.curriculum.terrain_levels = None
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
-        keyboard_yaw_sensitivity = 0.45 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1]
+        keyboard_yaw_sensitivity = 0.70 * env_cfg.commands.base_velocity.ranges.ang_vel_z[1]
         config = Se2KeyboardCfg(
             v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
             v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
             omega_z_sensitivity=keyboard_yaw_sensitivity,
         )
         controller = Se2Keyboard(config)
-        add_keyboard_fallback_keys(controller, env_cfg.commands.base_velocity.ranges.lin_vel_x[1], keyboard_yaw_sensitivity)
-        lin_vel_y_range = env_cfg.commands.base_velocity.ranges.lin_vel_y
-        if abs(lin_vel_y_range[0]) < 1e-6 and abs(lin_vel_y_range[1]) < 1e-6:
-            map_lateral_arrows_to_yaw(controller, keyboard_yaw_sensitivity)
+        set_keyboard_command_mapping(
+            controller,
+            env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
+            env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
+            keyboard_yaw_sensitivity,
+        )
         command_clip = {
             "x": (min(0.0, env_cfg.commands.base_velocity.ranges.lin_vel_x[0]), env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
             "y": env_cfg.commands.base_velocity.ranges.lin_vel_y,
@@ -274,7 +273,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         }
         print(
             "[KEYBOARD] Debug enabled. Click the Isaac Sim viewport, then press arrow keys. "
-            "Expected nonzero vx/yaw values will print here.",
+            "Arrows control vx/vy translation; Z/X control yaw. Expected nonzero vx/vy/yaw values will print here.",
             flush=True,
         )
         keyboard_debug_state = {"last_time": 0.0, "last_command": np.zeros(3, dtype=np.float32)}

@@ -29,6 +29,214 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-lateral-keyboard-diagonal-step-v1
+
+状态：本地验证通过，已同步云端，已提交并推送 GitHub。
+
+### 为什么修改
+
+用户实测发现两个问题：
+
+- 左右键语义不对：用户期望左右箭头是左右平移 `lin_vel_y`，而不是原地 yaw 转向；`Z/X` 才应该控制头部/机身 yaw 转向。
+- 最新 Flat 训练到约 1800 step 后仍然不能稳定抬轮/对角踏步转向。TensorBoard 也显示：
+  - `yaw_turn_feet_clearance` 仍低于 `0.01`，并且最近窗口下降。
+  - `feet_gait` 没有稳定上升。
+  - `feet_slide` 偏大，说明策略仍偏向贴地滑动。
+
+上一版主要靠 `yaw_turn_feet_clearance`，这个信号太稀疏，策略没有明显学到“一个对角组离地、另一个对角组支撑”。所以这次修改幅度更大：修正键盘语义、打开左右平移训练，并新增一个更直接的对角踏步接触相位 reward。
+
+### 修改文件
+
+- `robot_lab-main/scripts/reinforcement_learning/rsl_rl/play.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 修改键盘控制语义
+
+在 `play.py` 中删除“当 `lin_vel_y=0` 时把左右箭头映射成 yaw”的逻辑，改为固定映射：
+
+```text
+上箭头 / W        -> vx 正向，前进
+下箭头 / S        -> vx 负向，后退
+左箭头 / A        -> vy 正向，向左平移
+右箭头 / D        -> vy 负向，向右平移
+Z / Q             -> yaw 正向
+X / E             -> yaw 负向
+```
+
+同时把键盘 yaw 灵敏度从：
+
+```python
+0.45 * ang_vel_z_max
+```
+
+提高到：
+
+```python
+0.70 * ang_vel_z_max
+```
+
+原因：`Z/X` 明确负责 yaw 后，可以给更明显的 yaw 输入；左右键不再被拿来转向。
+
+#### 2. 打开 Flat 左右平移训练
+
+在 `flat_env_cfg.py` 中修改：
+
+```python
+lin_vel_y: (0.0, 0.0) -> (-0.45, 0.45)
+```
+
+原因：如果训练时 `lin_vel_y` 一直是 0，那么键盘左右平移即使能发出 `vy`，策略也没学过这个动作。打开后，Flat 预训练会同时学习前后、左右平移和 yaw。
+
+#### 3. 新增 `yaw_turn_diagonal_step`
+
+在 `rewards.py` 中新增 reward 函数：
+
+```python
+yaw_turn_diagonal_step
+```
+
+它只在接近原地 yaw 转向时启用：
+
+```python
+abs(yaw_command) > command_threshold
+norm(command_xy) <= max_xy_command
+```
+
+核心逻辑：
+
+```python
+pair_0 = ("fl_wheel", "hr_wheel")
+pair_1 = ("fr_wheel", "hl_wheel")
+
+pair_0_air = mean(pair_0 air_time > min_air_time)
+pair_1_air = mean(pair_1 air_time > min_air_time)
+pair_0_contact = mean(pair_0 contact_time > min_contact_time)
+pair_1_contact = mean(pair_1 contact_time > min_contact_time)
+
+pair_0_swing = pair_0_air * pair_1_contact
+pair_1_swing = pair_1_air * pair_0_contact
+reward = max(pair_0_swing, pair_1_swing)
+```
+
+含义：
+
+- `fl+hr` 离地、`fr+hl` 支撑，给分。
+- `fr+hl` 离地、`fl+hr` 支撑，给分。
+- 四轮贴地滑动，不给这个奖励。
+- 四轮同时乱跳，也不会拿到高分。
+
+这个 reward 比 `yaw_turn_feet_clearance` 更直接，先告诉策略“转向时应该出现对角支撑/摆动相位”；`yaw_turn_feet_clearance` 再负责让摆动脚/轮真的抬高。
+
+#### 4. Flat 中启用并加强对角踏步/抬轮
+
+新增启用：
+
+```python
+yaw_turn_diagonal_step.weight = 1.80
+```
+
+加强原有项：
+
+```python
+feet_gait.weight: 0.45 -> 0.90
+feet_gait.std: sqrt(0.5) -> 0.55
+feet_gait.max_err: 0.25 -> 0.30
+yaw_turn_feet_clearance.weight: 1.25 -> 2.40
+yaw_turn_feet_clearance.target_height: -0.27 -> -0.255
+yaw_turn_feet_clearance.min_air_time: 0.02 -> 0.025
+yaw_turn_feet_clearance.max_air_time: 0.18 -> 0.25
+yaw_turn_feet_clearance.tanh_mult: 4.0 -> 5.0
+yaw_turn_feet_clearance.min_base_height: 0.43 -> 0.435
+yaw_turn_feet_clearance.diagonal_pair_weight: 0.90 -> 0.95
+```
+
+原因：
+
+- `feet_gait` 负责对角时序。
+- `yaw_turn_diagonal_step` 负责“一个对角组离地、另一个对角组支撑”。
+- `yaw_turn_feet_clearance` 负责真的抬起来，而不是贴地擦。
+- `target_height=-0.255` 比上一版要求更高，逼它形成更明显的抬轮。
+
+#### 5. 降低纯 yaw 速度奖励，减少贴地滑动投机
+
+修改：
+
+```python
+track_ang_vel_z_exp.weight: 4.5 -> 3.2
+yaw_command_progress.weight: 2.4 -> 1.2
+```
+
+原因：之前 yaw 速度奖励比较强，策略可以通过贴地滑动、扭关节来拿 yaw 速度分。现在降低这两项，让“怎么转”比“只要转起来”更重要。
+
+#### 6. 加强滑动和 yaw 姿态约束
+
+修改：
+
+```python
+feet_slide.weight: -0.18 -> -0.26
+yaw_turn_joint_posture_l2.weight: -0.75 -> -1.0
+```
+
+原因：
+
+- `feet_slide` 更强，减少贴地拖着转。
+- `yaw_turn_joint_posture_l2` 更强，减少靠 hipx 横向强拧实现转向。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 PPO。
+- 没改 base 初始高度。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `play.py`
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `lin_vel_y = (-0.45, 0.45)`。
+- 云端确认 `yaw_turn_diagonal_step.weight = 1.80`。
+- 云端确认 `play.py` 中左/右箭头为 `vy`，`Z/X` 为 `yaw`。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+
+### 已知风险
+
+- 这次修改幅度较大，旧 checkpoint 不能代表新策略表现，必须重新开新 Flat 训练。
+- `lin_vel_y` 打开后，前期 mean_reward 可能短暂下降，因为任务从前后/yaw 变成前后/左右/yaw。
+- 抬轮和滑动惩罚更强，前 500-1000 step 可能看起来动作更犹豫。
+- 如果 `yaw_turn_diagonal_step` 上升但 `yaw_turn_feet_clearance` 不上升，说明有对角相位但抬得不够，需要继续提高 clearance 或检查 wheel air-time。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_turn_diagonal_step`
+- `Episode_Reward/yaw_turn_feet_clearance`
+- `Episode_Reward/feet_gait`
+- `Episode_Reward/feet_slide`
+- `Metrics/base_velocity/error_vel_xy`
+- `Metrics/base_velocity/error_vel_yaw`
+- 键盘测试时：
+  - 左右箭头应输出 `vy`。
+  - `Z/X` 应输出 `yaw`。
+  - 左右平移需要用新训练的 checkpoint 测，旧 checkpoint 没学过 `lin_vel_y`。
+
 ## 2026-06-16: flat-yaw-diagonal-clearance-v2
 
 状态：本地验证通过，已同步云端，已提交并推送 GitHub。
