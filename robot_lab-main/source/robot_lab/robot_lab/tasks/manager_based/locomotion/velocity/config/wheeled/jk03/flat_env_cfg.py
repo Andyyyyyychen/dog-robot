@@ -86,7 +86,7 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.action_rate_l2.weight = -0.003
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
-        self.rewards.feet_slide.weight = -0.16
+        self.rewards.feet_slide.weight = -0.18
         self.rewards.feet_height_body.weight = 0
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
@@ -103,16 +103,28 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.wheel_spin_without_progress.weight = 0
         self.rewards.wheel_lateral_edge_contact.weight = 0
         self.rewards.wheel_clearance_on_command.weight = 0
-        self.rewards.feet_gait.weight = 0.35
+        self.rewards.feet_gait.weight = 0.45
         self.rewards.feet_gait.params["command_threshold"] = 0.06
         self.rewards.feet_gait.params["velocity_threshold"] = 0.10
         self.rewards.feet_gait.params["max_err"] = 0.25
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("fl_wheel", "hr_wheel"), ("fr_wheel", "hl_wheel"))
         self.rewards.feet_gait.params["yaw_command_only"] = True
         self.rewards.feet_gait.params["max_xy_command"] = 0.18
-        self.rewards.yaw_turn_feet_clearance.weight = 0.80
+        self.rewards.yaw_turn_feet_clearance.weight = 1.25
         self.rewards.yaw_turn_feet_clearance.params["command_threshold"] = 0.06
         self.rewards.yaw_turn_feet_clearance.params["max_xy_command"] = 0.18
+        self.rewards.yaw_turn_feet_clearance.params["target_height"] = -0.27
+        self.rewards.yaw_turn_feet_clearance.params["min_air_time"] = 0.02
+        self.rewards.yaw_turn_feet_clearance.params["max_air_time"] = 0.18
+        self.rewards.yaw_turn_feet_clearance.params["tanh_mult"] = 4.0
+        self.rewards.yaw_turn_feet_clearance.params["min_base_height"] = 0.43
+        self.rewards.yaw_turn_feet_clearance.params["base_height_margin"] = 0.03
+        self.rewards.yaw_turn_feet_clearance.params["synced_feet_pair_names"] = (
+            ("fl_wheel", "hr_wheel"),
+            ("fr_wheel", "hl_wheel"),
+        )
+        self.rewards.yaw_turn_feet_clearance.params["min_contact_time"] = 0.015
+        self.rewards.yaw_turn_feet_clearance.params["diagonal_pair_weight"] = 0.90
         self.rewards.yaw_turn_feet_clearance.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.yaw_turn_feet_clearance.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.upward.weight = 0

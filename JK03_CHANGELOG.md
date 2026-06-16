@@ -29,9 +29,162 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-yaw-diagonal-clearance-v2
+
+状态：本地验证通过，已同步云端，已提交并推送 GitHub。
+
+### 为什么修改
+
+Flat 训练到约 1600 step 后，用户实测仍然没有形成“对角踏步原地转向”。上一版 `yaw_turn_feet_clearance` 的 TensorBoard 均值只在 `0.009` 左右平台，说明策略偶尔会抬轮，但没有稳定把“抬起对角轮、另一对角支撑”学成主要转向方式。视频/实测表现仍然偏向贴地滑动、拧关节和转向困难。
+
+这一版不再继续堆很多新 reward，而是把已有 `yaw_turn_feet_clearance` 改得更明确：转向时只有对角组真的离地、另一对角组在地面支撑，奖励才会明显变高。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 重写 `yaw_turn_feet_clearance` 的核心算法
+
+新增可选参数：
+
+```python
+synced_feet_pair_names
+min_contact_time
+diagonal_pair_weight
+```
+
+当 `synced_feet_pair_names` 存在时，函数不再只对四个轮子的 clearance 做简单平均，而是按两组对角轮计算：
+
+```python
+("fl_wheel", "hr_wheel")
+("fr_wheel", "hl_wheel")
+```
+
+核心逻辑变成：
+
+```python
+pair_0_lift = mean(lift_score of fl/hr)
+pair_1_lift = mean(lift_score of fr/hl)
+pair_0_ground = mean(contact_time of fl/hr > min_contact_time)
+pair_1_ground = mean(contact_time of fr/hl > min_contact_time)
+
+pair_0_swing_phase = pair_0_lift * pair_1_ground
+pair_1_swing_phase = pair_1_lift * pair_0_ground
+diagonal_reward = max(pair_0_swing_phase, pair_1_swing_phase)
+```
+
+含义：
+
+- `fl+hr` 抬起来、`fr+hl` 支撑，给高分。
+- `fr+hl` 抬起来、`fl+hr` 支撑，也给高分。
+- 四个轮子贴地滑动，几乎不给这个奖励。
+- 单个轮子乱抬，但另一对角组没有稳定支撑，奖励也不会高。
+
+最终奖励：
+
+```python
+reward = diagonal_pair_weight * diagonal_reward + (1 - diagonal_pair_weight) * average_lift_reward
+```
+
+`diagonal_pair_weight=0.90` 表示 90% 的奖励来自对角相位，10% 保留给早期探索，避免训练一开始完全没有梯度。
+
+#### 2. Flat 中加强对角踏步信号
+
+修改：
+
+```python
+feet_gait.weight: 0.35 -> 0.45
+yaw_turn_feet_clearance.weight: 0.80 -> 1.25
+```
+
+原因：
+
+- `feet_gait` 负责对角接触节奏。
+- `yaw_turn_feet_clearance` 负责真的抬起来。
+- 上一版两者都有改善，但抬轮 reward 平台太低，所以这次把二者同时加强，但没有改 yaw tracking 主奖励，避免策略只追求更快旋转又回到拧关节。
+
+#### 3. Flat 中提高抬轮目标
+
+修改：
+
+```python
+target_height: -0.29 -> -0.27
+min_air_time: 0.015 -> 0.02
+max_air_time: 0.20 -> 0.18
+tanh_mult: 3.0 -> 4.0
+min_base_height: 0.425 -> 0.43
+base_height_margin: 0.025 -> 0.03
+```
+
+原因：
+
+- `target_height=-0.27` 比上一版要求更高，防止只是轻微离地。
+- `min_air_time=0.02` 防止接触传感器抖一下就算抬腿。
+- `max_air_time=0.18` 防止长时间悬空乱跳。
+- `tanh_mult=4.0` 让轮/脚水平摆动更快进入奖励区间，鼓励真正换步。
+- `min_base_height=0.43` 防止趴下以后用很小动作骗 clearance。
+
+#### 4. 稍微加强滑动惩罚
+
+修改：
+
+```python
+feet_slide.weight: -0.16 -> -0.18
+```
+
+原因：
+
+上一版 `feet_slide` 仍然略差，说明它还在用贴地滑动转向。这里只小幅加强，避免把前进动作也惩罚得太死。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 PPO。
+- 没改动作空间。
+- 没改 base 初始高度。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+
+### 已知风险
+
+- 如果 `yaw_turn_feet_clearance` 权重过大，可能出现原地转向小跳步。
+- 如果 `feet_slide` 惩罚和 clearance 奖励冲突，早期 yaw 速度可能短暂下降。
+- 如果 2000 step 后 `yaw_turn_feet_clearance` 仍然低于 `0.02`，说明接触/抬轮信号仍不够，需要继续查视频和 wheel body 的 air-time 读数。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_turn_feet_clearance` 是否从 `0.009` 平台稳定突破 `0.02`。
+- `Episode_Reward/feet_gait` 是否继续上升，而不是单点冲高。
+- `Episode_Reward/feet_slide` 是否下降或至少不继续恶化。
+- `Metrics/base_velocity/error_vel_yaw` 是否继续下降。
+- 视频里是否出现 `fl+hr` 与 `fr+hl` 对角组交替抬起。
+
 ## 2026-06-16: flat-yaw-air-clearance-v1
 
-状态：本地验证通过，已同步云端，等待 GitHub 提交。
+状态：本地验证通过，已同步云端，已提交并推送 GitHub。
 
 ### 为什么修改
 

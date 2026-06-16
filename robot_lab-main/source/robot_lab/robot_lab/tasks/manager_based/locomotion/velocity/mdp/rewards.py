@@ -609,8 +609,11 @@ def yaw_turn_feet_clearance(
     tanh_mult: float,
     min_base_height: float,
     base_height_margin: float,
+    synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]] | None = None,
+    min_contact_time: float = 0.01,
+    diagonal_pair_weight: float = 0.85,
 ) -> torch.Tensor:
-    """Reward short airborne wheel clearance during near-in-place yaw turns."""
+    """Reward diagonal wheel clearance during near-in-place yaw turns."""
     asset: Articulation = env.scene[asset_cfg.name]
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     command = env.command_manager.get_command(command_name)
@@ -618,28 +621,49 @@ def yaw_turn_feet_clearance(
     yaw_command_abs = torch.abs(command[:, 2])
     active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
 
-    foot_pos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
-    foot_vel_translated = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[
-        :, :
-    ].unsqueeze(1)
+    use_diagonal_pairs = synced_feet_pair_names is not None
+    if use_diagonal_pairs:
+        asset_pair_0 = list(asset.find_bodies(synced_feet_pair_names[0])[0])
+        asset_pair_1 = list(asset.find_bodies(synced_feet_pair_names[1])[0])
+        sensor_pair_0 = list(contact_sensor.find_bodies(synced_feet_pair_names[0])[0])
+        sensor_pair_1 = list(contact_sensor.find_bodies(synced_feet_pair_names[1])[0])
+        asset_body_ids = asset_pair_0 + asset_pair_1
+        sensor_body_ids = sensor_pair_0 + sensor_pair_1
+    else:
+        asset_body_ids = asset_cfg.body_ids
+        sensor_body_ids = sensor_cfg.body_ids
 
-    foot_pos_b = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
+    foot_pos_translated = asset.data.body_pos_w[:, asset_body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    foot_vel_translated = asset.data.body_lin_vel_w[:, asset_body_ids, :] - asset.data.root_lin_vel_w[:, :].unsqueeze(1)
+
+    foot_pos_b = torch.zeros(env.num_envs, len(asset_body_ids), 3, device=env.device)
     foot_vel_b = torch.zeros_like(foot_pos_b)
-    for i in range(len(asset_cfg.body_ids)):
+    for i in range(len(asset_body_ids)):
         foot_pos_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
         foot_vel_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_vel_translated[:, i, :])
 
     height_span = max(target_height - min_height, 1.0e-6)
     clearance = torch.clamp((foot_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
     swing_scale = torch.tanh(tanh_mult * torch.linalg.norm(foot_vel_b[:, :, :2], dim=2))
-    air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    air_time = contact_sensor.data.current_air_time[:, sensor_body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, sensor_body_ids]
     airborne = (air_time > min_air_time).float()
     short_air = torch.clamp((max_air_time - air_time) / max(max_air_time - min_air_time, 1.0e-6), min=0.0, max=1.0)
     base_height_scale = torch.clamp(
         (asset.data.root_pos_w[:, 2] - min_base_height) / max(base_height_margin, 1.0e-6), min=0.0, max=1.0
     )
 
-    reward = torch.mean(clearance * swing_scale * airborne * short_air, dim=1)
+    lift_score = clearance * swing_scale * airborne * short_air
+    reward = torch.mean(lift_score, dim=1)
+    if use_diagonal_pairs:
+        pair_0_lift = torch.mean(lift_score[:, 0:2], dim=1)
+        pair_1_lift = torch.mean(lift_score[:, 2:4], dim=1)
+        pair_0_ground = torch.mean((contact_time[:, 0:2] > min_contact_time).float(), dim=1)
+        pair_1_ground = torch.mean((contact_time[:, 2:4] > min_contact_time).float(), dim=1)
+        pair_0_swing_phase = pair_0_lift * pair_1_ground
+        pair_1_swing_phase = pair_1_lift * pair_0_ground
+        diagonal_reward = torch.maximum(pair_0_swing_phase, pair_1_swing_phase)
+        reward = diagonal_pair_weight * diagonal_reward + (1.0 - diagonal_pair_weight) * reward
     reward *= active_command.float()
     reward *= base_height_scale
     reward *= _upright_scale(env)
