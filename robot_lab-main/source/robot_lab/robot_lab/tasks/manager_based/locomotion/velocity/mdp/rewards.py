@@ -647,19 +647,20 @@ def yaw_turn_feet_clearance(
     swing_scale = torch.tanh(tanh_mult * torch.linalg.norm(foot_vel_b[:, :, :2], dim=2))
     air_time = contact_sensor.data.current_air_time[:, sensor_body_ids]
     contact_time = contact_sensor.data.current_contact_time[:, sensor_body_ids]
-    airborne = (air_time > min_air_time).float()
+    air_score = torch.clamp(air_time / max(min_air_time, 1.0e-6), min=0.0, max=1.0)
+    contact_score = torch.clamp(contact_time / max(min_contact_time, 1.0e-6), min=0.0, max=1.0)
     short_air = torch.clamp((max_air_time - air_time) / max(max_air_time - min_air_time, 1.0e-6), min=0.0, max=1.0)
     base_height_scale = torch.clamp(
         (asset.data.root_pos_w[:, 2] - min_base_height) / max(base_height_margin, 1.0e-6), min=0.0, max=1.0
     )
 
-    lift_score = clearance * swing_scale * airborne * short_air
+    lift_score = clearance * swing_scale * air_score * short_air
     reward = torch.mean(lift_score, dim=1)
     if use_diagonal_pairs:
         pair_0_lift = torch.mean(lift_score[:, 0:2], dim=1)
         pair_1_lift = torch.mean(lift_score[:, 2:4], dim=1)
-        pair_0_ground = torch.mean((contact_time[:, 0:2] > min_contact_time).float(), dim=1)
-        pair_1_ground = torch.mean((contact_time[:, 2:4] > min_contact_time).float(), dim=1)
+        pair_0_ground = torch.mean(contact_score[:, 0:2], dim=1)
+        pair_1_ground = torch.mean(contact_score[:, 2:4], dim=1)
         pair_0_swing_phase = pair_0_lift * pair_1_ground
         pair_1_swing_phase = pair_1_lift * pair_0_ground
         diagonal_reward = torch.maximum(pair_0_swing_phase, pair_1_swing_phase)
@@ -694,10 +695,14 @@ def yaw_turn_diagonal_step(
     air_time = contact_sensor.data.current_air_time[:, body_ids]
     contact_time = contact_sensor.data.current_contact_time[:, body_ids]
 
-    pair_0_air = torch.mean((air_time[:, 0:2] > min_air_time).float(), dim=1)
-    pair_1_air = torch.mean((air_time[:, 2:4] > min_air_time).float(), dim=1)
-    pair_0_contact = torch.mean((contact_time[:, 0:2] > min_contact_time).float(), dim=1)
-    pair_1_contact = torch.mean((contact_time[:, 2:4] > min_contact_time).float(), dim=1)
+    pair_0_air = torch.mean(torch.clamp(air_time[:, 0:2] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_1_air = torch.mean(torch.clamp(air_time[:, 2:4] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_0_contact = torch.mean(
+        torch.clamp(contact_time[:, 0:2] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+    )
+    pair_1_contact = torch.mean(
+        torch.clamp(contact_time[:, 2:4] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+    )
 
     pair_0_swing = pair_0_air * pair_1_contact
     pair_1_swing = pair_1_air * pair_0_contact

@@ -48,3 +48,9 @@ class JK03RoughTrainerCfg(TrainerCfg):
 class JK03FlatTrainerCfg(JK03RoughTrainerCfg):
     max_iterations = 5000
     experiment_name = "jk03_flat"
+
+
+@dataclass
+class JK03FlatYawTrainerCfg(JK03FlatTrainerCfg):
+    max_iterations = 3000
+    experiment_name = "jk03_flat_yaw"

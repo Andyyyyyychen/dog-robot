@@ -45,3 +45,12 @@ class JK03FlatPPORunnerCfg(JK03RoughPPORunnerCfg):
 
         self.max_iterations = 5000
         self.experiment_name = "jk03_flat"
+
+
+@configclass
+class JK03FlatYawPPORunnerCfg(JK03FlatPPORunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.max_iterations = 3000
+        self.experiment_name = "jk03_flat_yaw"

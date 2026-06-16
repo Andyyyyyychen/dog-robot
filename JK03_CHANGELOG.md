@@ -29,6 +29,196 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-yaw-lift-pretrain-v2
+
+状态：本地验证通过，已同步云端并通过云端编译，待 GitHub 提交。
+
+### 为什么修改
+
+最新 Flat 训练到 `step 1449` 时，TensorBoard 显示：
+
+- `mean_reward`、`xy error`、`yaw error` 总体在改善，说明训练没有发散。
+- `yaw_turn_diagonal_step` 有小幅上升，但绝对值仍低。
+- `yaw_turn_feet_clearance` 从 `0.00317 -> 0.00292 -> 0.00281`，说明抬轮没有形成，甚至变弱。
+- `feet_slide` 仍偏大，策略仍可能靠贴地滑动、小幅关节扭动来完成 yaw。
+
+所以这次不继续只做小幅权重微调，而是按“先把原地 yaw 抬轮/对角踏步单独学出来”的思路修改：
+
+- 把 yaw 抬轮 reward 从硬阈值改成连续奖励，让早期小抬轮也能得到学习信号。
+- 进一步降低纯 yaw 速度奖励，减少贴地滑动投机。
+- 加强对角踏步、抬轮和滑动惩罚。
+- 新增一个 Flat-Yaw 专训任务，只训练原地 yaw，不训练前后/左右平移。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/__init__.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/cusrl_ppo_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. `yaw_turn_feet_clearance` 改成连续 air/contact 信号
+
+原来是硬判断：
+
+```python
+airborne = (air_time > min_air_time).float()
+pair_ground = (contact_time > min_contact_time).float()
+```
+
+问题：训练早期只要还没抬够 `min_air_time`，奖励就是 0，PPO 很难知道“稍微抬一点是对的”。
+
+现在改成：
+
+```python
+air_score = clamp(air_time / min_air_time, 0, 1)
+contact_score = clamp(contact_time / min_contact_time, 0, 1)
+```
+
+含义：还没完全达到阈值时也有 0 到 1 的渐进奖励，小抬轮、小接触保持都会产生学习方向。
+
+#### 2. `yaw_turn_diagonal_step` 也改成连续相位
+
+原来：
+
+```python
+pair_air = mean(air_time > min_air_time)
+pair_contact = mean(contact_time > min_contact_time)
+```
+
+现在：
+
+```python
+pair_air = mean(clamp(air_time / min_air_time, 0, 1))
+pair_contact = mean(clamp(contact_time / min_contact_time, 0, 1))
+```
+
+这样 `fl+hr` 与 `fr+hl` 的对角摆动/支撑关系更早能被奖励到，不用等完全超过硬阈值。
+
+#### 3. 主 Flat 降低纯 yaw 速度奖励
+
+修改：
+
+```python
+track_ang_vel_z_exp.weight: 3.2 -> 2.4
+yaw_command_progress.weight: 1.2 -> 0.8
+```
+
+原因：如果 yaw 速度奖励太高，策略会优先找“贴地滑动、扭关节也能转起来”的捷径。
+
+#### 4. 主 Flat 加强抬轮/对角踏步/滑动约束
+
+修改：
+
+```python
+feet_slide.weight: -0.26 -> -0.34
+feet_gait.weight: 0.90 -> 1.20
+yaw_turn_feet_clearance.weight: 2.40 -> 4.00
+yaw_turn_feet_clearance.target_height: -0.255 -> -0.245
+yaw_turn_feet_clearance.min_air_time: 0.025 -> 0.015
+yaw_turn_feet_clearance.max_air_time: 0.25 -> 0.28
+yaw_turn_feet_clearance.tanh_mult: 5.0 -> 6.0
+yaw_turn_diagonal_step.weight: 1.80 -> 3.00
+yaw_turn_diagonal_step.min_air_time: 0.025 -> 0.015
+yaw_turn_diagonal_step.phase_balance_weight: 0.20 -> 0.05
+```
+
+含义：
+
+- 更强惩罚贴地滑动。
+- 更强奖励对角步态。
+- 抬轮目标更高一点。
+- `min_air_time` 降低，是为了让早期探索更容易拿到连续奖励，不是降低最终要求。
+- `phase_balance_weight` 降低，是为了减少“四轮都差不多状态”时的保底分，更偏向一组对角脚摆动、另一组支撑。
+
+#### 5. 减轻普通关节惩罚，避免压住 hipy/knee 抬腿
+
+修改：
+
+```python
+joint_pos_penalty.weight: -1.1 -> -0.75
+```
+
+原因：普通关节惩罚太强时，策略可能不敢弯 `hipy/knee` 抬腿。保留 `yaw_turn_joint_posture_l2` 继续限制 `hipx` 横向强拧，但放松一般关节变化，让抬腿有空间。
+
+#### 6. 新增 Flat-Yaw 专训任务
+
+新增任务：
+
+```text
+RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0
+```
+
+对应环境：
+
+```python
+JK03FlatYawEnvCfg
+```
+
+命令范围：
+
+```python
+lin_vel_x = (0.0, 0.0)
+lin_vel_y = (0.0, 0.0)
+ang_vel_z = (-0.9, 0.9)
+```
+
+奖励更集中：
+
+```python
+track_ang_vel_z_exp.weight = 1.6
+yaw_command_progress.weight = 0.45
+yaw_stuck_with_command.weight = -4.0
+feet_slide.weight = -0.45
+feet_gait.weight = 1.60
+yaw_turn_feet_clearance.weight = 5.50
+yaw_turn_diagonal_step.weight = 4.00
+joint_pos_penalty.weight = -0.55
+yaw_turn_joint_posture_l2.weight = -0.80
+```
+
+原因：先单独训练“原地 yaw 时必须抬轮/对角踏步”，不要让 PPO 同时学习前进、后退、左右平移，降低探索难度。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum。
+- 没有修改 rough 的 terrain level 算法。
+
+### 推荐训练顺序
+
+先专训 yaw：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --max_iterations 3000
+```
+
+如果 `yaw_turn_feet_clearance` 和 `yaw_turn_diagonal_step` 明显上升，再回到完整 Flat：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --max_iterations 5000
+```
+
+### 下一步观察指标
+
+- `yaw_turn_feet_clearance`：希望从 `0.002-0.005` 提升到 `0.01+`。
+- `yaw_turn_diagonal_step`：希望从 `0.02-0.04` 提升到 `0.06+`。
+- `feet_slide`：不能继续变得更负。
+- `yaw error`：应缓慢下降。
+- 视频中应看到对角轮组交替离地，而不是身体趴下贴地滑动。
+
 ## 2026-06-16: flat-lateral-keyboard-diagonal-step-v1
 
 状态：本地验证通过，已同步云端，已提交并推送 GitHub。
