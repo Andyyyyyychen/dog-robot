@@ -185,6 +185,45 @@ def yaw_stuck_with_command(
     return reward
 
 
+def yaw_command_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_yaw_rate: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward signed yaw-rate progress when a turn command is present."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command_yaw = env.command_manager.get_command(command_name)[:, 2]
+    signed_yaw_rate = torch.sign(command_yaw) * asset.data.root_ang_vel_b[:, 2]
+    reward = torch.clamp(signed_yaw_rate / max(max_yaw_rate, 1.0e-6), min=0.0, max=1.0)
+    reward *= (torch.abs(command_yaw) > command_threshold).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def commanded_base_height_below_target(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    target_height: float,
+    height_margin: float,
+    command_threshold: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize crouching below the target base height while a velocity command is active."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    active_command = torch.logical_or(
+        torch.linalg.norm(command[:, :2], dim=1) > command_threshold,
+        torch.abs(command[:, 2]) > command_threshold,
+    )
+    height_deficit = torch.clamp(target_height - asset.data.root_pos_w[:, 2], min=0.0)
+    reward = torch.square(height_deficit / max(height_margin, 1.0e-6))
+    reward *= active_command.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def wheel_spin_when_stuck(
     env: ManagerBasedRLEnv,
     command_name: str,

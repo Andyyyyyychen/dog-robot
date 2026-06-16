@@ -46,6 +46,13 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
 
         self.rewards.track_lin_vel_xy_exp.weight = 8.0
         self.rewards.track_ang_vel_z_exp.weight = 5.0
+        self.rewards.yaw_command_progress.weight = 1.5
+        self.rewards.yaw_command_progress.params["command_threshold"] = 0.06
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.35
+        self.rewards.commanded_base_height_below_target.weight = -1.2
+        self.rewards.commanded_base_height_below_target.params["target_height"] = 0.43
+        self.rewards.commanded_base_height_below_target.params["height_margin"] = 0.08
+        self.rewards.commanded_base_height_below_target.params["command_threshold"] = 0.06
         self.rewards.joint_pos_penalty.weight = -0.45
         self.rewards.action_rate_l2.weight = -0.003
         self.rewards.wheel_vel_penalty.weight = 0
@@ -74,6 +81,10 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.curriculum.terrain_levels = None
         self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
         self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
+
+        # Keyboard play sends direct yaw-rate commands, so flat pretraining
+        # should learn direct yaw-rate tracking instead of heading-target turns.
+        self.commands.base_velocity.heading_command = False
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "JK03FlatEnvCfg":

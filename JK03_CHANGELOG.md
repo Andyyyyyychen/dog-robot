@@ -29,6 +29,133 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-basic-keyboard-control-v1
+
+状态：本地最新版。目标是先把平地基础动作调顺，再继续 rough/stair。
+
+### 为什么修改
+
+用户在平地键盘测试中观察到：
+
+- 按前进/后退时四肢关节明显弯曲，重心降低，像是靠趴低来移动。
+- 左右转向很不灵敏，甚至几乎不能用键盘控制 yaw。
+- 当前目标应先让 JK03 在 flat 上学会干净的直走、后退和左右转，再继续爬楼梯。
+
+上一版 flat 虽然有 `track_ang_vel_z_exp` 和 `yaw_stuck_with_command`，但缺少两个更直接的基础信号：
+
+- yaw 命令下，真的朝命令方向产生角速度。
+- 有速度命令时，不能把 base 压低到目标高度以下来偷分。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+
+### 怎么修改
+
+#### 新增 `yaw_command_progress`
+
+位置：`mdp/rewards.py`
+
+逻辑：
+
+```python
+signed_yaw_rate = sign(command_yaw) * root_ang_vel_b_z
+reward = clamp(signed_yaw_rate / max_yaw_rate, 0, 1)
+```
+
+含义：
+
+- 左转命令时，只有真的左转才给分。
+- 右转命令时，只有真的右转才给分。
+- 原地不转、转反方向都不给这个奖励。
+
+JK03 flat 中启用：
+
+```python
+yaw_command_progress.weight = 1.5
+command_threshold = 0.06
+max_yaw_rate = 0.35
+```
+
+目的：解决键盘左右转时策略没有足够直接动力去产生 yaw 的问题。
+
+#### 新增 `commanded_base_height_below_target`
+
+位置：`mdp/rewards.py`
+
+逻辑：
+
+```python
+height_deficit = clamp(target_height - root_pos_w_z, min=0)
+penalty = (height_deficit / height_margin) ** 2
+```
+
+含义：
+
+- 只惩罚低于目标高度，不惩罚略高。
+- 只在有 x/y/yaw 速度命令时启用。
+- 如果按前进/后退/左右转时 base 往下塌，就会扣分。
+
+JK03 flat 中启用：
+
+```python
+commanded_base_height_below_target.weight = -1.2
+target_height = 0.43
+height_margin = 0.08
+command_threshold = 0.06
+```
+
+目的：抑制“按键后四肢弯曲、重心降低”的动作，让平地策略先学会站高移动。
+
+#### Flat 训练改为直接 yaw-rate 命令
+
+位置：`jk03/flat_env_cfg.py`
+
+```python
+self.commands.base_velocity.heading_command = False
+```
+
+原因：
+
+- 键盘 play 发送的是直接速度命令：`vx, vy, yaw_rate`。
+- Flat 预训练如果仍以 heading target 为主，和键盘测试的 direct yaw-rate 分布不完全一致。
+- 先在 flat 上训练 direct yaw-rate，更适合验证左右键是否能直接转。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改楼梯 terrain generator 和 rough stair reward 权重。
+
+### 验证
+
+- 已进行本地 Python 编译检查。
+- 云服务器当前旧端口连续 `Connection refused`，本次无法上传云端验证；等用户提供新的 SSH 端口后再同步。
+
+### 已知风险
+
+- `commanded_base_height_below_target` 如果权重过大，可能让策略过度保守、速度变慢。
+- `yaw_command_progress` 会鼓励更主动转向，早期训练可能出现原地扭动，需要观察 `error_vel_yaw`、`track_ang_vel_z_exp` 和键盘 play 视频。
+- Flat 改为 direct yaw-rate 后，后续 Rough 是否也同步改 direct yaw-rate，需要先看 Flat 效果再决定。
+
+### 下一步观察指标
+
+- Flat TensorBoard：
+  - `Episode_Reward/yaw_command_progress`
+  - `Episode_Reward/commanded_base_height_below_target`
+  - `Metrics/base_velocity/error_vel_xy`
+  - `Metrics/base_velocity/error_vel_yaw`
+  - `Episode_Reward/track_lin_vel_xy_exp`
+  - `Episode_Reward/track_ang_vel_z_exp`
+- 视频/键盘：
+  - 按前进时 base 是否还明显下沉。
+  - 左右键是否能原地或低速稳定转向。
+  - 后退是否比之前有响应。
+
 ## 2026-06-15: strict-net-stair-progress-v2
 
 状态：当前最新版，已上传云服务器。需要重新启动训练进程才会生效。
@@ -398,4 +525,3 @@ JK03 重约 50 kg，比常见 15-20 kg 机器狗更难训练。早期 rough 训�
 - `value_loss` / `surrogate_loss` / `entropy_loss`：PPO 是否稳定。
 
 如果实际视频和 TensorBoard 冲突，以实际视频和真实行为为准，回头修正 reward 定义。
-

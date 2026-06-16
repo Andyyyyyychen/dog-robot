@@ -59,6 +59,29 @@ class JK03RewardsCfg(RewardsCfg):
         params={"command_name": "base_velocity", "command_threshold": 0.10, "yaw_velocity_threshold": 0.06},
     )
 
+    yaw_command_progress = RewTerm(
+        func=mdp.yaw_command_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_yaw_rate": 0.35,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    commanded_base_height_below_target = RewTerm(
+        func=mdp.commanded_base_height_below_target,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "target_height": 0.43,
+            "height_margin": 0.08,
+            "command_threshold": 0.08,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
     wheel_spin_when_stuck = RewTerm(
         func=mdp.wheel_spin_when_stuck,
         weight=0.0,
