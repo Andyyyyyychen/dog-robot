@@ -231,6 +231,34 @@ def commanded_base_height_below_target(
     return reward
 
 
+def commanded_joint_posture_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    asset_cfg: SceneEntityCfg,
+    straight_command_only: bool = False,
+    max_abs_yaw_command: float | None = None,
+) -> torch.Tensor:
+    """Penalize commanded motion that bends selected joints away from the default posture."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_or(
+        command_xy_norm > command_threshold,
+        yaw_command_abs > command_threshold,
+    )
+    if straight_command_only:
+        yaw_limit = command_threshold if max_abs_yaw_command is None else max_abs_yaw_command
+        active_command = torch.logical_and(command_xy_norm > command_threshold, yaw_command_abs <= yaw_limit)
+
+    joint_error = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    reward = torch.mean(torch.square(joint_error), dim=1)
+    reward *= active_command.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def wheel_spin_when_stuck(
     env: ManagerBasedRLEnv,
     command_name: str,

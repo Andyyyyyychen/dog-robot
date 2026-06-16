@@ -44,16 +44,22 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
             },
         }
 
+        self.rewards.base_height_l2.weight = -1.0
+        self.rewards.base_height_l2.params["target_height"] = 0.456
         self.rewards.track_lin_vel_xy_exp.weight = 8.0
-        self.rewards.track_ang_vel_z_exp.weight = 5.0
-        self.rewards.yaw_command_progress.weight = 1.5
+        self.rewards.track_ang_vel_z_exp.weight = 6.0
+        self.rewards.yaw_command_progress.weight = 3.0
         self.rewards.yaw_command_progress.params["command_threshold"] = 0.06
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.35
-        self.rewards.commanded_base_height_below_target.weight = -1.2
-        self.rewards.commanded_base_height_below_target.params["target_height"] = 0.43
-        self.rewards.commanded_base_height_below_target.params["height_margin"] = 0.08
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.60
+        self.rewards.commanded_base_height_below_target.weight = -3.0
+        self.rewards.commanded_base_height_below_target.params["target_height"] = 0.456
+        self.rewards.commanded_base_height_below_target.params["height_margin"] = 0.06
         self.rewards.commanded_base_height_below_target.params["command_threshold"] = 0.06
-        self.rewards.joint_pos_penalty.weight = -0.45
+        self.rewards.commanded_joint_posture_l2.weight = -0.8
+        self.rewards.commanded_joint_posture_l2.params["command_threshold"] = 0.06
+        self.rewards.commanded_joint_posture_l2.params["straight_command_only"] = False
+        self.rewards.commanded_joint_posture_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_pos_penalty.weight = -0.9
         self.rewards.action_rate_l2.weight = -0.003
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
@@ -62,7 +68,7 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
-        self.rewards.yaw_stuck_with_command.weight = -3.0
+        self.rewards.yaw_stuck_with_command.weight = -4.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.rewards.wheel_spin_when_stuck.weight = 0
@@ -80,11 +86,13 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         # no terrain curriculum
         self.curriculum.terrain_levels = None
         self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.5, 1.0)
-        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.5, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.8, 1.0)
 
         # Keyboard play sends direct yaw-rate commands, so flat pretraining
         # should learn direct yaw-rate tracking instead of heading-target turns.
         self.commands.base_velocity.heading_command = False
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.heading = (-1.0, 1.0)
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "JK03FlatEnvCfg":

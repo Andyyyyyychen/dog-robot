@@ -29,6 +29,180 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: urdf-height-flat-turn-fix-v1
+
+状态：已本地验证，已同步云端，随本次提交推送 GitHub。
+
+### 为什么修改
+
+用户测试 Flat 后发现两个核心问题：
+
+- Flat 策略一跑就明显蹲下去，四肢关节弯曲，重心降低。
+- 键盘左右不能实现原地转弯。
+
+这说明上一版只靠 `commanded_base_height_below_target` 还不够，原因有两个：
+
+- 目标高度 `0.43` 偏低，没有真正按 URDF 的轮子半径和默认站姿计算。
+- 只有 base 高度惩罚，不足以阻止腿部关节偏离默认姿态。
+- Flat 的 yaw 命令范围和 yaw 奖励偏保守，键盘原地转信号不够强。
+
+### URDF 依据
+
+根据 `jk03.urdf`：
+
+- `hipy -> knee` 关节原点 z 长度约 `0.20m`。
+- `knee -> wheel` 关节原点 z 长度约 `0.2455886m`。
+- wheel collision 半径是 `0.105m`。
+- `jk03.py` 默认站姿是：
+
+```python
+hipy = 0.9
+knee = -1.33
+```
+
+按 URDF 前向几何计算，默认站姿下 wheel center 相对 base 的 z 约为：
+
+```text
+-0.3509m
+```
+
+所以轮子接地时，理论 base 高度约为：
+
+```text
+0.3509 + 0.105 = 0.4559m
+```
+
+因此这次将训练 reward 的目标高度从 `0.43` 改为 `0.456`。这不是修改 JK03 初始参数，而是让 reward target 与 URDF 几何更一致。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 新增 `commanded_joint_posture_l2`
+
+新增 reward 函数：
+
+```python
+commanded_joint_posture_l2
+```
+
+逻辑：
+
+```python
+joint_error = joint_pos - default_joint_pos
+reward = mean(square(joint_error))
+```
+
+含义：
+
+- 有命令时，如果腿部关节偏离默认站姿太多，就扣分。
+- Flat 中对所有速度/yaw 命令生效。
+- Rough 中只对直走命令生效，避免影响转向和爬楼梯姿态调整。
+
+#### Flat 高度和姿态加强
+
+Flat 中修改：
+
+```python
+base_height_l2.weight = -1.0
+base_height_l2.target_height = 0.456
+commanded_base_height_below_target.weight = -3.0
+commanded_base_height_below_target.target_height = 0.456
+commanded_base_height_below_target.height_margin = 0.06
+commanded_joint_posture_l2.weight = -0.8
+joint_pos_penalty.weight = -0.9
+```
+
+目的：
+
+- 不再允许 Flat 策略通过蹲低获得速度。
+- 直走/后退/yaw 时都更倾向保持默认腿部姿态。
+
+#### Flat 原地转向加强
+
+Flat 中修改：
+
+```python
+track_ang_vel_z_exp.weight = 6.0
+yaw_command_progress.weight = 3.0
+yaw_command_progress.max_yaw_rate = 0.60
+yaw_stuck_with_command.weight = -4.0
+commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+command_levels_ang_vel.range_multiplier = (0.8, 1.0)
+```
+
+目的：
+
+- 让训练更重视 yaw。
+- 让键盘左右键能给出更明显的 yaw command。
+- 让纯 yaw / 原地转向样本更容易被学到。
+
+#### Rough 直走姿态同步修正
+
+Rough 中修改：
+
+```python
+base_height_l2.target_height = 0.456
+commanded_base_height_below_target.weight = -0.50
+commanded_base_height_below_target.target_height = 0.456
+commanded_joint_posture_l2.weight = -0.25
+commanded_joint_posture_l2.straight_command_only = True
+```
+
+目的：
+
+- Rough 直走时也不要明显趴低。
+- 但 Rough 不像 Flat 那样强约束，避免让楼梯动作变僵硬。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 terrain generator。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py` 中的 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `rough_env_cfg.py` 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+- GitHub commit/push：随本次版本提交并推送。
+
+### 已知风险
+
+- Flat 姿态约束明显变强，早期训练可能速度学得慢一点。
+- Rough 直走姿态会更稳，但如果爬楼梯变僵，需要降低 Rough 的 `commanded_base_height_below_target.weight` 或 `commanded_joint_posture_l2.weight`。
+- 如果原地转向仍弱，下一步应检查左右轮差速是否学出来，而不是继续只加 yaw reward。
+
+### 下一步观察指标
+
+- Flat：
+  - `Episode_Reward/commanded_base_height_below_target`
+  - `Episode_Reward/commanded_joint_posture_l2`
+  - `Episode_Reward/yaw_command_progress`
+  - `Metrics/base_velocity/error_vel_yaw`
+  - `Metrics/base_velocity/error_vel_xy`
+- 视频/键盘：
+  - 直走时 base 是否接近站高。
+  - 四肢 hipy/knee 是否还明显继续弯。
+  - 只按左右键时能否原地转向。
+
 ## 2026-06-16: rough-straight-posture-hold-v1
 
 状态：本地最新版，已准备同步云端和 GitHub。
