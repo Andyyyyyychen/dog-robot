@@ -209,14 +209,21 @@ def commanded_base_height_below_target(
     height_margin: float,
     command_threshold: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    straight_command_only: bool = False,
+    max_abs_yaw_command: float | None = None,
 ) -> torch.Tensor:
     """Penalize crouching below the target base height while a velocity command is active."""
     asset: RigidObject = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
     active_command = torch.logical_or(
-        torch.linalg.norm(command[:, :2], dim=1) > command_threshold,
-        torch.abs(command[:, 2]) > command_threshold,
+        command_xy_norm > command_threshold,
+        yaw_command_abs > command_threshold,
     )
+    if straight_command_only:
+        yaw_limit = command_threshold if max_abs_yaw_command is None else max_abs_yaw_command
+        active_command = torch.logical_and(command_xy_norm > command_threshold, yaw_command_abs <= yaw_limit)
     height_deficit = torch.clamp(target_height - asset.data.root_pos_w[:, 2], min=0.0)
     reward = torch.square(height_deficit / max(height_margin, 1.0e-6))
     reward *= active_command.float()

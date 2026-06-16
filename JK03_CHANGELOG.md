@@ -29,6 +29,110 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: rough-straight-posture-hold-v1
+
+状态：本地最新版，已准备同步云端和 GitHub。
+
+### 为什么修改
+
+用户进一步说明：不仅希望 Flat 平地动作好，也希望 Rough 训练后的狗在直走时不要明显改变姿态，不要按前进后四肢弯曲、重心降低。
+
+上一版 `commanded_base_height_below_target` 只在 Flat 里启用，Rough 中权重为 `0.0`。这样 Rough 楼梯训练不会受影响，但也不能约束 Rough 直走时的趴低动作。
+
+这次目标是在 Rough 中加入一个**弱的、只对直走生效的姿态约束**：
+
+- 直走时，不鼓励把 base 压低到 `0.43` 以下。
+- 转向时不启用，避免影响 yaw 控制。
+- 爬楼梯/复杂地形中需要姿态变化时，尽量不强行锁死身体高度。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 扩展 `commanded_base_height_below_target`
+
+给函数增加两个可选参数：
+
+```python
+straight_command_only: bool = False
+max_abs_yaw_command: float | None = None
+```
+
+默认值保持旧行为不变，所以 Flat 的逻辑不受影响。
+
+当 `straight_command_only=True` 时，函数只在下面条件满足时生效：
+
+```python
+command_xy_norm > command_threshold
+yaw_command_abs <= max_abs_yaw_command
+```
+
+含义：
+
+- 有前进/后退速度命令。
+- yaw 命令很小，也就是近似直走。
+- 这时如果 base 高度低于目标高度才扣分。
+
+#### 在 Rough 中启用弱约束
+
+在 JK03 Rough 配置中加入：
+
+```python
+commanded_base_height_below_target.weight = -0.35
+height_margin = 0.10
+command_threshold = 0.08
+straight_command_only = True
+max_abs_yaw_command = 0.08
+```
+
+解释：
+
+- `-0.35` 比 Flat 的 `-1.2` 弱很多，避免过度限制爬楼梯。
+- `height_margin = 0.10` 比 Flat 的 `0.08` 更宽松，允许 Rough 地形上有一点姿态变化。
+- `straight_command_only=True` 保证只管直走，不管明显转向。
+- `max_abs_yaw_command=0.08` 表示 yaw 命令很小时才认为是直走。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改楼梯 terrain generator。
+- 没改变 Flat 上一版新增的 yaw reward 权重。
+
+### 验证
+
+- 本地 Python 编译检查通过。
+- 云端已覆盖上传到 `/root/dog-robot-main/robot_lab-main`。
+- 云端 Python 编译检查通过：`REMOTE_COMPILE_OK`。
+- 云端确认 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)` 仍在原位。
+- 云端确认 JK03 rough 无 terrain override：`NO_JK03_TERRAIN_OVERRIDE`。
+- 待 GitHub commit/push。
+
+### 已知风险
+
+- 如果后续发现 Rough 直走变稳但爬楼梯更僵硬，说明 `-0.35` 仍然偏强，需要降到 `-0.15 ~ -0.25`。
+- 如果直走仍然明显塌低，说明 `-0.35` 偏弱，可以小幅提高到 `-0.5`，但不建议直接用 Flat 的 `-1.2`。
+
+### 下一步观察指标
+
+- Rough TensorBoard：
+  - `Episode_Reward/commanded_base_height_below_target`
+  - `Episode_Reward/base_height_l2`
+  - `Episode_Reward/stair_upward_progress`
+  - `Episode_Reward/commanded_motion_progress`
+  - `Metrics/base_velocity/error_vel_xy`
+  - `Metrics/base_velocity/error_vel_yaw`
+- 视频/键盘：
+  - 直走时 base 是否还明显下沉。
+  - 转向时是否仍能转。
+  - 爬楼梯是否变僵硬。
+
 ## 2026-06-16: flat-basic-keyboard-control-v1
 
 状态：本地最新版。目标是先把平地基础动作调顺，再继续 rough/stair。

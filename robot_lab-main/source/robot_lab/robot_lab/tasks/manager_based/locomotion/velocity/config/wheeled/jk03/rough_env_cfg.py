@@ -373,6 +373,11 @@ class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.yaw_stuck_with_command.weight = -2.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
+        self.rewards.commanded_base_height_below_target.weight = -0.35
+        self.rewards.commanded_base_height_below_target.params["height_margin"] = 0.10
+        self.rewards.commanded_base_height_below_target.params["command_threshold"] = 0.08
+        self.rewards.commanded_base_height_below_target.params["straight_command_only"] = True
+        self.rewards.commanded_base_height_below_target.params["max_abs_yaw_command"] = 0.08
         self.rewards.wheel_spin_when_stuck.weight = -1.0e-4
         self.rewards.wheel_spin_when_stuck.params["command_threshold"] = 0.08
         self.rewards.wheel_spin_when_stuck.params["velocity_threshold"] = 0.08
