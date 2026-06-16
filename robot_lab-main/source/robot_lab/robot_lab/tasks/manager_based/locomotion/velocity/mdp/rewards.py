@@ -595,6 +595,57 @@ def wheel_clearance_on_command(
     return reward
 
 
+def yaw_turn_feet_clearance(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    min_height: float,
+    target_height: float,
+    min_air_time: float,
+    max_air_time: float,
+    tanh_mult: float,
+    min_base_height: float,
+    base_height_margin: float,
+) -> torch.Tensor:
+    """Reward short airborne wheel clearance during near-in-place yaw turns."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    foot_pos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    foot_vel_translated = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[
+        :, :
+    ].unsqueeze(1)
+
+    foot_pos_b = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
+    foot_vel_b = torch.zeros_like(foot_pos_b)
+    for i in range(len(asset_cfg.body_ids)):
+        foot_pos_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
+        foot_vel_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_vel_translated[:, i, :])
+
+    height_span = max(target_height - min_height, 1.0e-6)
+    clearance = torch.clamp((foot_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
+    swing_scale = torch.tanh(tanh_mult * torch.linalg.norm(foot_vel_b[:, :, :2], dim=2))
+    air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    airborne = (air_time > min_air_time).float()
+    short_air = torch.clamp((max_air_time - air_time) / max(max_air_time - min_air_time, 1.0e-6), min=0.0, max=1.0)
+    base_height_scale = torch.clamp(
+        (asset.data.root_pos_w[:, 2] - min_base_height) / max(base_height_margin, 1.0e-6), min=0.0, max=1.0
+    )
+
+    reward = torch.mean(clearance * swing_scale * airborne * short_air, dim=1)
+    reward *= active_command.float()
+    reward *= base_height_scale
+    reward *= _upright_scale(env)
+    return reward
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 

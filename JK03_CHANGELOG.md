@@ -29,9 +29,194 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
-## 2026-06-16: flat-yaw-diagonal-gait-v1
+## 2026-06-16: flat-yaw-air-clearance-v1
 
 状态：本地验证通过，已同步云端，等待 GitHub 提交。
+
+### 为什么修改
+
+Flat 新版训练到约 1600 step 后，用户实测仍然没有明显抬腿/抬轮转向。TensorBoard 数据也支持这个判断：
+
+- `vel_yaw_error` 在下降，说明它越来越会产生 yaw。
+- `joint_deviation_hipx_l1` 和 `yaw_turn_joint_posture_l2` 在改善，说明强拧 hipx 减少了。
+- 但 `feet_gait` 均值没有稳定突破，`feet_slide` 仍然略差，说明策略可能仍在贴地滑动/拖地转。
+
+因此只靠 `feet_gait` 的接触时序奖励不够，需要给它一个更直接、但严格受限的“原地 yaw 抬轮/抬脚 clearance”奖励。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 新增 `yaw_turn_feet_clearance`
+
+新增 reward 函数：
+
+```python
+yaw_turn_feet_clearance
+```
+
+这个函数只在以下条件同时满足时给奖励：
+
+```text
+abs(yaw_command) > command_threshold
+xy_command_norm <= max_xy_command
+current_air_time > min_air_time
+base_height >= min_base_height
+robot upright
+```
+
+也就是说：
+
+- 必须是接近原地左/右转。
+- 轮/脚必须真的离地，不能只靠身体趴低骗 clearance。
+- 身体高度太低时不给分。
+- 机器人歪倒时不给分。
+
+核心计算：
+
+```python
+clearance = clamp((foot_z_body - min_height) / (target_height - min_height), 0, 1)
+swing_scale = tanh(tanh_mult * horizontal_foot_speed)
+airborne = current_air_time > min_air_time
+short_air = clamp((max_air_time - current_air_time) / (max_air_time - min_air_time), 0, 1)
+reward = mean(clearance * swing_scale * airborne * short_air)
+```
+
+含义：
+
+- `clearance`：轮/脚相对机身抬得够不够。
+- `swing_scale`：轮/脚是否真的在摆动换位置。
+- `airborne`：必须离地。
+- `short_air`：鼓励短促抬步，不鼓励长时间悬空乱跳。
+
+#### JK03 reward 配置里注册新 term
+
+在 `JK03RewardsCfg` 中新增：
+
+```python
+yaw_turn_feet_clearance = RewTerm(...)
+```
+
+默认权重为：
+
+```python
+weight = 0.0
+```
+
+这样 Rough 不会自动受影响，只有 Flat 显式打开时才生效。
+
+参数：
+
+```python
+min_height = -0.35
+target_height = -0.29
+min_air_time = 0.015
+max_air_time = 0.20
+min_base_height = 0.425
+base_height_margin = 0.025
+```
+
+这些值的含义：
+
+- 默认轮心相对 base 大约在 `-0.35m` 附近。
+- `target_height=-0.29` 表示希望转向时轮/脚能相对机身抬起约 6cm。
+- `min_air_time=0.015` 防止刚刚抖一下就算有效抬腿。
+- `max_air_time=0.20` 防止它长时间悬空乱跳。
+- `min_base_height=0.425` 防止趴下骗奖励。
+
+#### Flat 中打开 yaw-only 抬轮奖励
+
+新增：
+
+```python
+self.rewards.yaw_turn_feet_clearance.weight = 0.80
+self.rewards.yaw_turn_feet_clearance.params["command_threshold"] = 0.06
+self.rewards.yaw_turn_feet_clearance.params["max_xy_command"] = 0.18
+self.rewards.yaw_turn_feet_clearance.params["asset_cfg"].body_names = [self.foot_link_name]
+self.rewards.yaw_turn_feet_clearance.params["sensor_cfg"].body_names = [self.foot_link_name]
+```
+
+目的：
+
+- 只在原地转向时奖励抬轮/抬脚。
+- 使用 JK03 的四个 wheel body 作为 foot/wheel。
+- 结合已有 `feet_gait`，让它不只是接触节奏对，还要真的离地。
+
+#### 微调 Flat 动作空间
+
+修改：
+
+```python
+hipy/knee action scale: 0.14 -> 0.17
+```
+
+原因：
+
+- 之前 hipy/knee 动作幅度可能太小，策略即使想抬腿也难以产生足够 clearance。
+- `hipx` 仍保持 `0.06`，继续限制大幅横向拧腿。
+
+#### 加强滑动惩罚
+
+修改：
+
+```python
+feet_slide.weight: -0.12 -> -0.16
+```
+
+原因：
+
+- 既然现在给了抬轮/抬脚奖励，就可以稍微提高滑动惩罚，减少贴地拖着转的投机方式。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 Rough 楼梯 reward 权重。
+- 没改 PPO。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+- GitHub commit/push：待本次版本提交并推送。
+
+### 已知风险
+
+- 如果 `yaw_turn_feet_clearance` 太强，可能出现转向时小跳步，需要降低 weight 或降低 target clearance。
+- 如果 `feet_slide` 惩罚太强，可能短期转向速度下降。
+- 如果 2000-2500 step 后仍不抬腿，需要检查 contact sensor 的 `current_air_time` 是否真的能捕捉 wheel 离地。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_turn_feet_clearance`
+- `Episode_Reward/feet_gait`
+- `Episode_Reward/feet_slide`
+- `Metrics/base_velocity/error_vel_yaw`
+- `Episode_Reward/ang_vel_xy_l2`
+- 视频里 wheel/foot 是否短促离地，而不是贴地滑动。
+
+## 2026-06-16: flat-yaw-diagonal-gait-v1
+
+状态：本地验证通过，已同步云端，已提交并推送 GitHub。
 
 ### 为什么修改
 
@@ -164,7 +349,7 @@ feet_slide.weight: -0.18 -> -0.12
 - 云端 `python3 -m py_compile` 通过。
 - 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
 - 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
-- GitHub commit/push：待本次版本提交并推送。
+- GitHub commit/push：`1ade8dc Add JK03 flat yaw diagonal gait reward`。
 
 ### 已知风险
 

@@ -46,8 +46,8 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
 
         self.actions.joint_pos.scale = {
             ".*_hipx_joint": 0.06,
-            ".*_hipy_joint": 0.14,
-            ".*_knee_joint": 0.14,
+            ".*_hipy_joint": 0.17,
+            ".*_knee_joint": 0.17,
         }
         self.actions.joint_vel.scale = 10.0
 
@@ -86,7 +86,7 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.action_rate_l2.weight = -0.003
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
-        self.rewards.feet_slide.weight = -0.12
+        self.rewards.feet_slide.weight = -0.16
         self.rewards.feet_height_body.weight = 0
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
@@ -110,6 +110,11 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("fl_wheel", "hr_wheel"), ("fr_wheel", "hl_wheel"))
         self.rewards.feet_gait.params["yaw_command_only"] = True
         self.rewards.feet_gait.params["max_xy_command"] = 0.18
+        self.rewards.yaw_turn_feet_clearance.weight = 0.80
+        self.rewards.yaw_turn_feet_clearance.params["command_threshold"] = 0.06
+        self.rewards.yaw_turn_feet_clearance.params["max_xy_command"] = 0.18
+        self.rewards.yaw_turn_feet_clearance.params["asset_cfg"].body_names = [self.foot_link_name]
+        self.rewards.yaw_turn_feet_clearance.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.upward.weight = 0
 
         self.rewards.stand_still.params["command_threshold"] = 0.03

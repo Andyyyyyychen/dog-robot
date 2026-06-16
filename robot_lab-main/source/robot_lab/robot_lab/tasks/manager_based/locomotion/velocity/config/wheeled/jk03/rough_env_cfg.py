@@ -229,6 +229,25 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_turn_feet_clearance = RewTerm(
+        func=mdp.yaw_turn_feet_clearance,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.18,
+            "min_height": -0.35,
+            "target_height": -0.29,
+            "min_air_time": 0.015,
+            "max_air_time": 0.20,
+            "tanh_mult": 3.0,
+            "min_base_height": 0.425,
+            "base_height_margin": 0.025,
+            "asset_cfg": SceneEntityCfg("robot", body_names=""),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
