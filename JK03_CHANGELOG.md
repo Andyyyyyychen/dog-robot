@@ -29,6 +29,192 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-yaw-step-turn-v1
+
+状态：本地验证通过，已同步云端，准备提交 GitHub。
+
+### 为什么修改
+
+用户测试最新版 Flat 后反馈：
+
+- 直走已经明显变好，但前轮/前腿仍然有轻微向前弯曲。
+- 左右原地转向还不能稳定完成 360 度。
+- 右转尤其弱。
+- 当前转弯方式更像把关节拧过去，不像成熟四足那样靠抬腿/换步完成原地转向。
+
+本次目标是把 Flat 的转向策略从“扭关节硬转”引导到“yaw 命令下短步抬轮/抬腿换向”。参考了仓库内 Unitree Go2、A1、MagicDog 等成熟四足配置常见思路：yaw tracking、feet air time、feet height/clearance、joint mirror/姿态约束组合使用，而不是单靠 yaw 速度奖励。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 扩展 `commanded_joint_posture_l2`
+
+新增两个可选参数：
+
+```python
+yaw_command_only: bool = False
+max_xy_command: float | None = None
+```
+
+作用：
+
+- 原来只能按“有命令”或“直走命令”启用。
+- 现在可以按“近似原地 yaw 命令”启用。
+- 用于单独限制转向时的 `hipx` 侧摆，避免靠大幅拧腿完成转向。
+
+#### 新增 `yaw_turn_feet_air_time`
+
+新增 yaw-only 抬步奖励：
+
+```python
+yaw_turn_feet_air_time
+```
+
+逻辑：
+
+- 只有 yaw 命令超过阈值，并且 xy 命令很小时才启用。
+- 当轮/脚离地一小段时间后重新接触地面，会得到奖励。
+- 奖励窗口是 `0.04s` 到 `0.22s`，鼓励短促换步，而不是长时间悬空。
+
+目的：
+
+- 让原地转向时学会“抬一下再落下”的换步，而不是一直贴地拧。
+
+#### 新增 `yaw_turn_feet_clearance`
+
+新增 yaw-only 抬轮/抬脚高度奖励：
+
+```python
+yaw_turn_feet_clearance
+```
+
+逻辑：
+
+- 只在近似原地 yaw 命令下启用。
+- 计算 wheel/foot 相对 base 的 z 高度。
+- 鼓励移动中的轮/脚从约 `-0.34m` 抬到约 `-0.28m` 附近。
+
+目的：
+
+- 给策略一个连续信号，告诉它转向时不要只拖地或拧腿，要把轮/脚稍微抬起来换位置。
+
+#### Flat 中调整直走姿态
+
+```python
+commanded_joint_posture_l2.straight_command_only = True
+commanded_joint_posture_l2.max_abs_yaw_command = 0.08
+```
+
+含义：
+
+- 原来 Flat 的关节姿态约束对 yaw 也生效。
+- 现在它只管直走/后退时保持默认姿态。
+- 转向时不再用全腿默认姿态约束锁死 hipy/knee，给抬腿换步留空间。
+
+新增前腿直走约束：
+
+```python
+front_joint_posture_l2.weight = -0.55
+front_joint_posture_l2.joint_names = [
+    "fl_hipy_joint", "fl_knee_joint", "fr_hipy_joint", "fr_knee_joint",
+]
+```
+
+目的：
+
+- 直走时专门压住前腿 hipy/knee 的过度前折。
+- 只在直走命令下生效，不限制原地转向抬腿。
+
+#### Flat 中调整原地转向
+
+新增 yaw-only hipx 姿态约束：
+
+```python
+yaw_turn_joint_posture_l2.weight = -0.55
+yaw_turn_joint_posture_l2.joint_names = ".*_hipx_joint"
+yaw_turn_joint_posture_l2.yaw_command_only = True
+```
+
+目的：
+
+- 原地转向时不希望靠 hipx 大幅侧摆/拧腿完成动作。
+
+打开 yaw-only 抬步奖励：
+
+```python
+yaw_turn_feet_air_time.weight = 0.45
+yaw_turn_feet_clearance.weight = 0.55
+```
+
+目的：
+
+- 让策略在原地转向时更倾向抬轮/抬脚换步。
+
+加强 yaw 控制：
+
+```python
+track_ang_vel_z_exp.weight = 7.0
+yaw_command_progress.weight = 4.0
+yaw_command_progress.max_yaw_rate = 0.85
+yaw_stuck_with_command.weight = -5.0
+commands.base_velocity.ranges.ang_vel_z = (-1.2, 1.2)
+```
+
+目的：
+
+- 给左右转更大的训练范围和更明确的奖励。
+- 让 360 度原地转向更可能学出来。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 command generator 通用逻辑。
+- Rough 中新增 reward term 默认权重都是 `0.0`，本次主要生效对象是 Flat。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+- GitHub commit/push：随本次版本提交并推送。
+
+### 已知风险
+
+- yaw-only 抬步奖励可能让训练早期转向动作更活跃，需要重新训练 Flat 后观察视频。
+- 如果出现转向时跳动太大，优先降低 `yaw_turn_feet_clearance.weight`。
+- 如果仍然右转弱，下一步要检查键盘命令符号、yaw 正负方向和左右轮/对角腿动作是否存在结构性偏置。
+- 如果前腿直走仍前折，可以继续提高 `front_joint_posture_l2.weight`，但不要过高，否则会限制正常缓冲。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_turn_feet_air_time`
+- `Episode_Reward/yaw_turn_feet_clearance`
+- `Episode_Reward/yaw_turn_joint_posture_l2`
+- `Episode_Reward/front_joint_posture_l2`
+- `Metrics/base_velocity/error_vel_yaw`
+- 视频中原地左转/右转是否都能持续旋转。
+- 转向时是否从“拧 hipx”变成“短步抬轮/抬腿换向”。
+
 ## 2026-06-16: urdf-height-flat-turn-fix-v1
 
 状态：已本地验证，已同步云端，随本次提交推送 GitHub。
