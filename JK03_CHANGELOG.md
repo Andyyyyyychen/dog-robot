@@ -29,6 +29,227 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-turn-simplify-after-video-v1
+
+状态：本地验证通过，已同步云端，准备提交 GitHub。
+
+### 为什么修改
+
+用户反馈上一版 Flat 仍然有严重问题：
+
+- 左右转变成趴下身体左右转。
+- 后退很慢。
+- 转弯仍然靠扭动关节，不是抬腿/换步。
+- 上一版新增函数太多，reward 目标过散。
+
+我从云端下载并重新录制了最新 Flat 视频：
+
+- 云端视频：`logs/rsl_rl/jk03_flat/2026-06-16_11-03-29/videos/play/rl-video-step-0.mp4`
+- 本地视频：`cloud_videos/flat_latest_2026-06-16_110329.mp4`
+- 本地抽帧：`cloud_videos/flat_latest_2026-06-16_110329_frames/`
+
+视频观察结论：
+
+- 机器人确实不是原地踏步转向。
+- 转向时机身明显侧倾/压低。
+- 轮子外撇，腿部 hipx/hipy/knee 姿态很大。
+- 轮子多数时间接近贴地拖动，不是稳定小步换向。
+- 上一版 `yaw_turn_feet_air_time` 和 `yaw_turn_feet_clearance` 没有让它学会真正踏步，反而和过强 yaw reward 叠加，给了“趴下、撑开、拖地转”的投机空间。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 删除上一版多余 yaw-only 函数
+
+删除：
+
+```python
+yaw_turn_feet_air_time
+yaw_turn_feet_clearance
+```
+
+原因：
+
+- 它们没有可靠形成“像成熟四足那样小步换向”的动作。
+- 对轮腿 JK03 来说，仅奖励轮/脚短暂离地或相对高度，容易被策略用侧倾、外撇、拖地方式骗过去。
+- 本次改为更精炼的 Flat 目标，不继续堆函数。
+
+#### 删除对应 reward term
+
+从 JK03 reward 配置里删除：
+
+```python
+yaw_turn_feet_air_time
+yaw_turn_feet_clearance
+```
+
+保留：
+
+```python
+front_joint_posture_l2
+yaw_turn_joint_posture_l2
+```
+
+它们都复用现有 `commanded_joint_posture_l2`，不新增复杂函数。
+
+#### Flat 中关闭 rough/stair 类 reward
+
+Flat 中关闭：
+
+```python
+commanded_motion_progress.weight = 0
+upward_without_forward_progress.weight = 0
+vertical_bounce_without_progress.weight = 0
+wheel_spin_without_progress.weight = 0
+wheel_clearance_on_command.weight = 0
+feet_gait.weight = 0
+upward.weight = 0
+```
+
+原因：
+
+- Flat 的目标是基础直走、后退、左右原地转。
+- 楼梯/抬升/越障类 reward 会给平地策略奇怪的投机方向。
+
+#### Flat 中加强机身水平和站高
+
+新增/调整：
+
+```python
+flat_orientation_l2.weight = -2.0
+ang_vel_xy_l2.weight = -0.15
+commanded_base_height_below_target.weight = -3.5
+```
+
+原因：
+
+- 视频里主要问题不是转不动，而是转向时身体侧倾、压低。
+- 先保证机身水平和站高，再谈丝滑转向。
+
+#### Flat 中限制腿部 action 幅度
+
+新增：
+
+```python
+actions.joint_pos.scale = {
+    ".*_hipx_joint": 0.06,
+    ".*_hipy_joint": 0.14,
+    ".*_knee_joint": 0.14,
+}
+actions.joint_vel.scale = 10.0
+```
+
+原因：
+
+- 平地转向应该更多靠轮速/差速和小姿态调整，不应该靠大幅扭腿。
+- 降低腿部 action 幅度，给轮子动作更多空间。
+
+#### Flat 中降低过强 yaw 奖励
+
+从上一版：
+
+```python
+track_ang_vel_z_exp.weight = 7.0
+yaw_command_progress.weight = 4.0
+yaw_stuck_with_command.weight = -5.0
+ang_vel_z = (-1.2, 1.2)
+```
+
+调整为：
+
+```python
+track_ang_vel_z_exp.weight = 4.0
+yaw_command_progress.weight = 2.0
+yaw_stuck_with_command.weight = -3.0
+ang_vel_z = (-0.8, 0.8)
+```
+
+原因：
+
+- 上一版 yaw 目标太强，策略宁愿趴下、侧倾、扭腿也要追 yaw。
+- 现在先让 yaw 能稳定、水平地转，再逐步提高速度。
+
+#### Flat 中改善后退慢
+
+新增：
+
+```python
+commands.base_velocity.ranges.lin_vel_x = (-0.8, 1.0)
+```
+
+原因：
+
+- 之前 Flat 继承的后退范围偏小，训练/键盘后退自然慢。
+- 这次直接把后退命令范围扩大到 `-0.8`。
+
+#### Flat 中继续抑制前腿前折和 hipx 扭转
+
+调整：
+
+```python
+front_joint_posture_l2.weight = -0.70
+yaw_turn_joint_posture_l2.weight = -1.10
+joint_deviation_hipx_l1.weight = -0.35
+joint_pos_penalty.weight = -1.1
+feet_slide.weight = -0.18
+```
+
+原因：
+
+- 前腿前折继续用前腿 hipy/knee 姿态约束处理。
+- 转向扭腿主要压 `hipx`，避免大幅外撇。
+- 增加 `feet_slide` 惩罚，减少拖地横滑。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 command generator 通用逻辑。
+- 本次主要修 Flat，不动 Rough 楼梯 curriculum。
+
+### 验证
+
+- 已下载/录制最新 Flat 视频并查看抽帧。
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+- GitHub commit/push：随本次版本提交并推送。
+
+### 已知风险
+
+- yaw reward 降低后，早期原地转速度可能变慢，但应该更少趴下和扭腿。
+- 腿部 action scale 降低后，Flat 会更偏轮式运动；如果用户坚持必须像纯四足那样明显抬腿，需要后续单独设计 gait phase 或接触时序，而不是再堆普通 reward。
+- 如果右转仍弱，下一步必须做固定 `yaw=-0.6` 和 `yaw=+0.6` 的对称测试，检查符号和轮速差是否对称。
+
+### 下一步观察指标
+
+- 视频中 base 是否保持水平。
+- 转向时是否还明显趴下。
+- `Episode_Reward/yaw_turn_joint_posture_l2`
+- `Episode_Reward/front_joint_posture_l2`
+- `Episode_Reward/feet_slide`
+- `Metrics/base_velocity/error_vel_yaw`
+- 后退命令下 `base_vx` 是否能明显接近负值。
+
 ## 2026-06-16: flat-yaw-step-turn-v1
 
 状态：本地验证通过，已同步云端，准备提交 GitHub。

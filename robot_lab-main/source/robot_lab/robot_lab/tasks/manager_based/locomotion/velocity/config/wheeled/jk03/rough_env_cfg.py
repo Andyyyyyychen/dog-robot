@@ -112,33 +112,6 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
-    yaw_turn_feet_air_time = RewTerm(
-        func=mdp.yaw_turn_feet_air_time,
-        weight=0.0,
-        params={
-            "command_name": "base_velocity",
-            "yaw_command_threshold": 0.08,
-            "max_xy_command": 0.12,
-            "min_air_time": 0.04,
-            "max_air_time": 0.22,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-        },
-    )
-
-    yaw_turn_feet_clearance = RewTerm(
-        func=mdp.yaw_turn_feet_clearance,
-        weight=0.0,
-        params={
-            "command_name": "base_velocity",
-            "yaw_command_threshold": 0.08,
-            "max_xy_command": 0.12,
-            "min_height": -0.34,
-            "target_height": -0.28,
-            "tanh_mult": 3.0,
-            "asset_cfg": SceneEntityCfg("robot", body_names=""),
-        },
-    )
-
     wheel_spin_when_stuck = RewTerm(
         func=mdp.wheel_spin_when_stuck,
         weight=0.0,

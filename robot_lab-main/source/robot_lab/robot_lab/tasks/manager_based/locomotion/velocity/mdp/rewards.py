@@ -264,64 +264,6 @@ def commanded_joint_posture_l2(
     return reward
 
 
-def yaw_turn_feet_air_time(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    sensor_cfg: SceneEntityCfg,
-    yaw_command_threshold: float,
-    max_xy_command: float,
-    min_air_time: float,
-    max_air_time: float,
-) -> torch.Tensor:
-    """Reward short stepping contacts during near-in-place yaw commands."""
-    command = env.command_manager.get_command(command_name)
-    yaw_command_abs = torch.abs(command[:, 2])
-    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
-    active_turn = torch.logical_and(yaw_command_abs > yaw_command_threshold, command_xy_norm <= max_xy_command)
-
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids].float()
-    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
-    air_window = max(max_air_time - min_air_time, 1.0e-6)
-    step_score = torch.clamp((last_air_time - min_air_time) / air_window, min=0.0, max=1.0)
-    reward = torch.mean(step_score * first_contact, dim=1)
-    reward *= active_turn.float()
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
-    return reward
-
-
-def yaw_turn_feet_clearance(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    asset_cfg: SceneEntityCfg,
-    yaw_command_threshold: float,
-    max_xy_command: float,
-    min_height: float,
-    target_height: float,
-    tanh_mult: float,
-) -> torch.Tensor:
-    """Reward wheel/foot clearance relative to the body during near-in-place yaw commands."""
-    asset: RigidObject = env.scene[asset_cfg.name]
-    command = env.command_manager.get_command(command_name)
-    yaw_command_abs = torch.abs(command[:, 2])
-    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
-    active_turn = torch.logical_and(yaw_command_abs > yaw_command_threshold, command_xy_norm <= max_xy_command)
-
-    foot_pos_body = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
-    foot_vel_body = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[:, :].unsqueeze(1)
-    for foot_id in range(len(asset_cfg.body_ids)):
-        foot_pos_body[:, foot_id, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_pos_body[:, foot_id, :])
-        foot_vel_body[:, foot_id, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_vel_body[:, foot_id, :])
-
-    height_window = max(target_height - min_height, 1.0e-6)
-    clearance = torch.clamp((foot_pos_body[:, :, 2] - min_height) / height_window, min=0.0, max=1.0)
-    moving_feet = torch.tanh(tanh_mult * torch.linalg.norm(foot_vel_body[:, :, :2], dim=2))
-    reward = torch.mean(clearance * moving_feet, dim=1)
-    reward *= active_turn.float()
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
-    return reward
-
-
 def wheel_spin_when_stuck(
     env: ManagerBasedRLEnv,
     command_name: str,
