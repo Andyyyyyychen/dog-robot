@@ -642,6 +642,8 @@ class GaitReward(ManagerTermBase):
         synced_feet_pair_names,
         asset_cfg: SceneEntityCfg,
         sensor_cfg: SceneEntityCfg,
+        yaw_command_only: bool = False,
+        max_xy_command: float | None = None,
     ) -> torch.Tensor:
         """Compute the reward.
 
@@ -663,14 +665,18 @@ class GaitReward(ManagerTermBase):
         async_reward_2 = self._async_reward_func(self.synced_feet_pairs[0][0], self.synced_feet_pairs[1][1])
         async_reward_3 = self._async_reward_func(self.synced_feet_pairs[1][0], self.synced_feet_pairs[0][1])
         async_reward = async_reward_0 * async_reward_1 * async_reward_2 * async_reward_3
-        # only enforce gait if cmd > 0
-        cmd = torch.linalg.norm(env.command_manager.get_command(self.command_name), dim=1)
-        body_vel = torch.linalg.norm(self.asset.data.root_com_lin_vel_b[:, :2], dim=1)
-        reward = torch.where(
-            torch.logical_or(cmd > self.command_threshold, body_vel > self.velocity_threshold),
-            sync_reward * async_reward,
-            0.0,
-        )
+        # only enforce gait when a matching command is present
+        command = env.command_manager.get_command(command_name)
+        if yaw_command_only:
+            command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+            yaw_command_abs = torch.abs(command[:, 2])
+            xy_limit = command_threshold if max_xy_command is None else max_xy_command
+            active = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= xy_limit)
+        else:
+            cmd = torch.linalg.norm(command, dim=1)
+            body_vel = torch.linalg.norm(self.asset.data.root_com_lin_vel_b[:, :2], dim=1)
+            active = torch.logical_or(cmd > command_threshold, body_vel > velocity_threshold)
+        reward = torch.where(active, sync_reward * async_reward, 0.0)
         reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
         return reward
 

@@ -29,6 +29,158 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-16: flat-yaw-diagonal-gait-v1
+
+状态：本地验证通过，已同步云端，等待 GitHub 提交。
+
+### 为什么修改
+
+用户和同事反馈 Flat 原地转向仍然不对：
+
+- 转向时不应该靠强拧 hipx/腿部角度完成。
+- 成熟四足原地转向通常是左右/对角腿有节奏地踏步换向。
+- 当前 Flat 即使 yaw 指标在变好，视频里的动作仍可能是“拧关节、拖地、趴低”。
+
+本次目标是只做精炼修改：不再新增复杂抬腿函数，而是复用仓库已有的 `GaitReward`，让它只在原地 yaw 命令下启用，给策略明确的“对角腿同步、另一对对角腿反相”的踏步转向信号。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 扩展 `GaitReward`
+
+在 `GaitReward.__call__` 增加两个可选参数：
+
+```python
+yaw_command_only: bool = False
+max_xy_command: float | None = None
+```
+
+含义：
+
+- 默认 `False`，所以其他机器人和 Rough 原来的 gait reward 行为不变。
+- 当 `yaw_command_only=True` 时，只有满足：
+
+```text
+abs(yaw_command) > command_threshold
+xy_command_norm <= max_xy_command
+```
+
+才启用 gait reward。
+
+这样 Flat 原地转向会被鼓励成“对角踏步转”，但直走/后退时不会被这个转向步态奖励干扰。
+
+#### Flat 打开 yaw-only 对角步态奖励
+
+新增/调整：
+
+```python
+feet_gait.weight = 0.35
+feet_gait.command_threshold = 0.06
+feet_gait.velocity_threshold = 0.10
+feet_gait.max_err = 0.25
+feet_gait.synced_feet_pair_names = (("fl_wheel", "hr_wheel"), ("fr_wheel", "hl_wheel"))
+feet_gait.yaw_command_only = True
+feet_gait.max_xy_command = 0.18
+```
+
+目的：
+
+- `fl_wheel + hr_wheel` 同步。
+- `fr_wheel + hl_wheel` 同步。
+- 两组对角腿互相反相。
+- 只在近似原地左/右转命令下生效。
+
+这比之前单独奖励“脚抬高”更稳，因为它奖励的是接触时序，而不是单纯让脚离地。
+
+#### 适度放松 yaw 时 hipx 硬约束
+
+修改：
+
+```python
+yaw_turn_joint_posture_l2.weight: -1.10 -> -0.75
+```
+
+原因：
+
+- `-1.10` 会强压 hipx 偏离，确实能减少拧腿，但也可能让策略不敢正常小幅摆腿换步。
+- 改到 `-0.75` 后仍然惩罚大幅拧 hipx，但允许必要的小幅踏步调整。
+
+#### 适度增强 yaw 目标，但不回到过强版本
+
+修改：
+
+```python
+track_ang_vel_z_exp.weight: 4.0 -> 4.5
+yaw_command_progress.weight: 2.0 -> 2.4
+yaw_command_progress.max_yaw_rate: 0.60 -> 0.70
+ang_vel_z range: (-0.8, 0.8) -> (-0.9, 0.9)
+```
+
+原因：
+
+- 右转/原地 360 度仍弱，yaw 目标需要稍强一点。
+- 但不恢复到上一版 `7.0 / 4.0 / 1.2` 那种强 yaw，因为那会诱导趴下、侧倾、扭腿硬转。
+
+#### 放松一点 feet_slide
+
+修改：
+
+```python
+feet_slide.weight: -0.18 -> -0.12
+```
+
+原因：
+
+- 原地转向时脚/轮需要换支撑点，过强滑动惩罚可能让策略宁愿卡住不转。
+- 这不是鼓励拖地，而是给 gait reward 留出踏步探索空间。
+
+### 没有修改
+
+- 没改 URDF。
+- 没改 `jk03.py` 初始物理参数。
+- 没改 fan-ziqi 原始 `terrain_levels_vel`。
+- 没在 JK03 rough 配置里覆盖 terrain level 算法。
+- 没改 Rough 楼梯 reward 权重。
+- 没改 PPO。
+
+### 验证
+
+- 本地 Python 编译检查通过：
+  - `rewards.py`
+  - `flat_env_cfg.py`
+  - `rough_env_cfg.py`
+- 本地 `git diff --check` 通过。
+- 本地保护项 diff 为空：
+  - 未修改 `jk03.py`。
+  - 未修改 `jk03.urdf`。
+  - 未修改 `velocity_env_cfg.py`。
+  - 未修改 `curriculums.py`。
+- 云端 `ssh -p 30216 root@183.147.142.40` 已覆盖上传。
+- 云端 `python3 -m py_compile` 通过。
+- 云端确认 `velocity_env_cfg.py` 仍为 `terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 云端确认 JK03 rough 没有 `terrain_levels` 覆盖：`NO_JK03_TERRAIN_OVERRIDE`。
+- GitHub commit/push：待本次版本提交并推送。
+
+### 已知风险
+
+- gait reward 是接触时序奖励，不是显式动作相位控制；它会引导踏步，但不能保证一开始就像实机控制器那样稳定。
+- 如果 `feet_gait` 太强，可能让原地转向出现小跳步；如果太弱，则仍可能靠轮子拖地。
+- 如果右转继续比左转弱，需要单独做 yaw 正负方向对称性测试。
+
+### 下一步观察指标
+
+- `Episode_Reward/feet_gait`
+- `Metrics/base_velocity/error_vel_yaw`
+- `Episode_Reward/yaw_command_progress`
+- `Episode_Reward/yaw_turn_joint_posture_l2`
+- `Episode_Reward/feet_slide`
+- 视频里左右转是否从“拧 hipx”变成“对角短步换向”。
+
 ## 2026-06-16: flat-turn-simplify-after-video-v1
 
 状态：本地验证通过，已同步云端，准备提交 GitHub。
