@@ -266,6 +266,20 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_turn_air_time_deficit = RewTerm(
+        func=mdp.yaw_turn_air_time_deficit,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "synced_feet_pair_names": (("", ""), ("", "")),
+            "min_air_time": 0.015,
+            "min_contact_time": 0.015,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):

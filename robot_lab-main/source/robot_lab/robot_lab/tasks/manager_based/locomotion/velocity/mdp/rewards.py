@@ -714,6 +714,47 @@ def yaw_turn_diagonal_step(
     return reward
 
 
+def yaw_turn_air_time_deficit(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]],
+    min_air_time: float,
+    min_contact_time: float,
+) -> torch.Tensor:
+    """Penalize yaw turns that do not create a diagonal swing/support phase."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    pair_0 = list(contact_sensor.find_bodies(synced_feet_pair_names[0])[0])
+    pair_1 = list(contact_sensor.find_bodies(synced_feet_pair_names[1])[0])
+    body_ids = pair_0 + pair_1
+    air_time = contact_sensor.data.current_air_time[:, body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, body_ids]
+
+    pair_0_air = torch.mean(torch.clamp(air_time[:, 0:2] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_1_air = torch.mean(torch.clamp(air_time[:, 2:4] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_0_contact = torch.mean(
+        torch.clamp(contact_time[:, 0:2] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+    )
+    pair_1_contact = torch.mean(
+        torch.clamp(contact_time[:, 2:4] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+    )
+
+    pair_0_swing_support = pair_0_air * pair_1_contact
+    pair_1_swing_support = pair_1_air * pair_0_contact
+    best_diagonal_phase = torch.maximum(pair_0_swing_support, pair_1_swing_support)
+    penalty = torch.square(1.0 - best_diagonal_phase)
+    penalty *= active_command.float()
+    penalty *= _upright_scale(env)
+    return penalty
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 

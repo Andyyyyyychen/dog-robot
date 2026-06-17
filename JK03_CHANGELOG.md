@@ -29,9 +29,159 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-17: flat-yaw-lift-aggressive-v3
+
+状态：本地验证通过，已同步云端并通过云端编译，已提交并推送 GitHub。
+
+### 为什么修改
+
+Flat 训练到约 `step 1930` 后，趋势显示：
+
+- `mean_reward`、`xy velocity error`、`yaw velocity error` 继续改善，说明训练整体没有发散。
+- `joint_deviation_hipx_l1` 和 `joint_pos_penalty` 变好，说明关节强扭和整体姿态更稳定。
+- 但 `yaw_turn_feet_clearance` 从 `0.00754 -> 0.00657` 下降。
+- `yaw_turn_diagonal_step` 从 `0.0854 -> 0.0740` 下降。
+- `feet_gait` 从 `0.0998 -> 0.0839` 下降。
+
+这说明策略学会了更稳地跟速度和保持姿态，但仍在回避“抬轮/对角踏步转向”，可能继续靠贴地小滑动或低幅关节动作完成 yaw。
+
+本次修改目标是更激进地让它先学会：有原地 yaw 命令时，必须出现一组对角轮离地、另一组对角轮支撑的相位。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 新增 `yaw_turn_air_time_deficit`
+
+新增 reward 函数：
+
+```python
+yaw_turn_air_time_deficit(...)
+```
+
+它只在 yaw-only 命令下生效：
+
+```python
+abs(command_yaw) > command_threshold
+norm(command_xy) <= max_xy_command
+```
+
+算法核心：
+
+```python
+pair_0_swing_support = pair_0_air * pair_1_contact
+pair_1_swing_support = pair_1_air * pair_0_contact
+best_diagonal_phase = max(pair_0_swing_support, pair_1_swing_support)
+penalty = square(1.0 - best_diagonal_phase)
+```
+
+含义：
+
+- `pair_0_air`：第一组对角轮 `fl_wheel + hr_wheel` 的离地时间得分。
+- `pair_1_air`：第二组对角轮 `fr_wheel + hl_wheel` 的离地时间得分。
+- `pair_0_contact` / `pair_1_contact`：对应对角组的支撑接触时间得分。
+- 如果一组对角轮离地、另一组对角轮支撑，`best_diagonal_phase` 接近 1，惩罚接近 0。
+- 如果 yaw 命令下四个轮都贴地，没有抬轮相位，惩罚接近 1。
+
+这个项不是奖励“转得快”，而是直接惩罚“不抬腿转向”。
+
+#### 2. 主 Flat 更偏向抬轮转向
+
+降低容易产生贴地转向捷径的项：
+
+```python
+track_ang_vel_z_exp.weight: 2.4 -> 1.6
+yaw_command_progress.weight: 0.8 -> 0.35
+```
+
+放松普通关节和动作变化约束，让 hipy/knee 有空间抬轮：
+
+```python
+joint_pos_penalty.weight: -0.75 -> -0.55
+action_rate_l2.weight: -0.003 -> -0.002
+```
+
+但仍保留 hipx 约束，避免靠横向强拧转向：
+
+```python
+yaw_turn_joint_posture_l2.weight: -1.0 -> -0.75
+```
+
+大幅加强抬轮和对角踏步：
+
+```python
+feet_slide.weight: -0.34 -> -0.50
+feet_gait.weight: 1.20 -> 1.80
+feet_gait.std: 0.55 -> 0.45
+yaw_turn_feet_clearance.weight: 4.00 -> 7.50
+yaw_turn_feet_clearance.target_height: -0.245 -> -0.235
+yaw_turn_feet_clearance.min_air_time: 0.015 -> 0.010
+yaw_turn_feet_clearance.max_air_time: 0.28 -> 0.32
+yaw_turn_feet_clearance.tanh_mult: 6.0 -> 7.5
+yaw_turn_diagonal_step.weight: 3.00 -> 5.50
+yaw_turn_diagonal_step.phase_balance_weight: 0.05 -> 0.0
+yaw_turn_air_time_deficit.weight: 0.0 -> -3.00
+```
+
+#### 3. Flat-Yaw 专训更激进
+
+Flat-Yaw 任务继续只训练原地 yaw：
+
+```python
+lin_vel_x = (0.0, 0.0)
+lin_vel_y = (0.0, 0.0)
+ang_vel_z = (-0.9, 0.9)
+```
+
+这次让它更专注于抬轮，而不是先追 yaw 速度：
+
+```python
+track_ang_vel_z_exp.weight = 1.0
+yaw_command_progress.weight = 0.20
+yaw_stuck_with_command.weight = -5.0
+feet_slide.weight = -0.65
+feet_gait.weight = 2.50
+yaw_turn_feet_clearance.weight = 10.00
+yaw_turn_diagonal_step.weight = 8.00
+yaw_turn_air_time_deficit.weight = -5.00
+joint_pos_penalty.weight = -0.35
+yaw_turn_joint_posture_l2.weight = -0.55
+```
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum。
+- 没有修改 terrain level 算法。
+
+### 推荐训练顺序
+
+如果当前 Flat 到 2000 步仍不会抬轮，建议不要继续只用普通 Flat 硬跑，先切到 yaw-only 预训练：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0 \
+  --headless \
+  --num_envs 256 \
+  --max_iterations 3000
+```
+
+观察：
+
+- `yaw_turn_air_time_deficit` 应明显下降。
+- `yaw_turn_feet_clearance` 应稳定升到 `0.01+`。
+- `yaw_turn_diagonal_step` 应稳定升到 `0.10+`。
+- `feet_slide` 不应继续变得更负。
+
 ## 2026-06-16: flat-yaw-lift-pretrain-v2
 
-状态：本地验证通过，已同步云端并通过云端编译，待 GitHub 提交。
+状态：本地验证通过，已同步云端并通过云端编译，已提交并推送 GitHub。
 
 ### 为什么修改
 
