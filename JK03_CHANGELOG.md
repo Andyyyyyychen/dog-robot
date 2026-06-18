@@ -29,6 +29,156 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-18: flat-basic-motion-v5
+
+状态：本地验证通过，已同步云端并通过云端编译，随本次提交推送 GitHub。
+
+### 为什么修改
+
+用户实测反馈：最新版普通 flat 训练出来后“几乎一点都动不了”。结合云端 TensorBoard 趋势：
+
+- `mean_reward` 和 `mean_episode_length` 在上升，说明它学会了更稳定地活着。
+- 但 `yaw_turn_tangential_swing`、`yaw_turn_feet_clearance` 仍然很低，说明抬腿转向并没有真正学出来。
+- `feet_slide`、`joint_deviation_hipx_l1` 等项仍在拉扯策略。
+- 普通 `Flat-JK03-v0` 同时承担“基础移动 + yaw 抬腿 + 对角踏步 + 防滑 + 姿态约束”，奖励目标太多，早期策略容易选择少动或不动。
+
+本次方向改为做减法：
+
+- 普通 flat 阶段先不训练前后脚抬起、对角踏步和 yaw 专项摆腿。
+- 先让狗学会前进、后退、左右平移和基本 yaw 命令下能动。
+- 防滑只保留为脚滑惩罚，不再用一堆抬腿函数硬逼动作。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 普通 `JK03FlatEnvCfg` 里关闭 yaw 抬腿/对角踏步奖励
+
+将以下普通 flat 权重改为 `0`：
+
+- `feet_gait.weight = 0`
+- `yaw_turn_feet_clearance.weight = 0`
+- `yaw_turn_diagonal_step.weight = 0`
+- `yaw_turn_air_time_deficit.weight = 0`
+- `yaw_turn_phase_timeout.weight = 0`
+- `yaw_turn_tangential_swing.weight = 0`
+
+含义：普通 flat 不再奖励“抬脚”“对角踏步”“切向摆腿”。这些目标会让还不会稳定运动的早期策略害怕动作，甚至选择站住。
+
+#### 2. 保留并增强脚滑惩罚
+
+将：
+
+```python
+feet_slide.weight = -0.70
+```
+
+改为：
+
+```python
+feet_slide.weight = -1.00
+```
+
+含义：当前阶段不是强迫抬腿，而是避免它靠脚/轮子乱滑来骗速度。
+
+#### 3. 提高基础速度跟踪
+
+将：
+
+```python
+track_lin_vel_xy_exp.weight = 8.0
+track_ang_vel_z_exp.weight = 1.6
+```
+
+改为：
+
+```python
+track_lin_vel_xy_exp.weight = 9.0
+track_ang_vel_z_exp.weight = 1.8
+```
+
+含义：让“按键后真的动起来”重新成为普通 flat 的主目标。
+
+#### 4. 放松关节姿态惩罚
+
+将：
+
+```python
+commanded_joint_posture_l2.weight = -0.8
+front_joint_posture_l2.weight = -0.70
+yaw_turn_joint_posture_l2.weight = -1.00
+joint_deviation_hipx_l1.weight = -0.35
+joint_pos_penalty.weight = -0.55
+```
+
+改为：
+
+```python
+commanded_joint_posture_l2.weight = -0.45
+front_joint_posture_l2.weight = -0.35
+yaw_turn_joint_posture_l2.weight = -0.25
+joint_deviation_hipx_l1.weight = -0.15
+joint_pos_penalty.weight = -0.35
+```
+
+含义：之前这些惩罚叠加后，会让策略觉得动腿、动 hipx 都很危险。现在先允许它动起来，后续再逐步收姿态。
+
+#### 5. `JK03FlatYawEnvCfg` 也临时关闭抬腿专项项
+
+将 yaw 专项里的：
+
+- `feet_gait`
+- `yaw_turn_feet_clearance`
+- `yaw_turn_diagonal_step`
+- `yaw_turn_air_time_deficit`
+- `yaw_turn_phase_timeout`
+- `yaw_turn_tangential_swing`
+
+权重也改为 `0`，避免误跑 yaw 专项时又进入“奖励太复杂导致不动”的问题。保留：
+
+```python
+feet_slide.weight = -1.20
+track_ang_vel_z_exp.weight = 1.2
+```
+
+含义：yaw 专项也先回到“能转、少滑”，不再追求抬腿转向。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi terrain curriculum。
+- 没有修改 `curriculums.py`。
+- 没有删除之前新增的 reward 函数，只是把普通 flat/yaw 中相关权重关掉。
+
+### 已知风险
+
+- 这一版不再追求“抬腿转向”，所以视觉上可能更像轮足滑/滚动转向。
+- 只用脚滑惩罚不一定能让动作像宇树机械狗，但能先排除“不动”的问题。
+- 如果 `feet_slide=-1.00` 仍然过强，下一步应降到 `-0.6~-0.8`，而不是重新加抬腿函数。
+
+### 下一步观察
+
+优先观察：
+
+- `Train/mean_reward`
+- `Train/mean_episode_length`
+- `Metrics/base_velocity/error_vel_xy`
+- `Metrics/base_velocity/error_vel_yaw`
+- `Episode_Reward/feet_slide`
+- `Episode_Reward/joint_pos_penalty`
+- `Episode_Reward/joint_deviation_hipx_l1`
+
+用户测试重点：
+
+- 上下键能否前进/后退。
+- 左右键能否左右平移。
+- Z/X 能否 yaw 转向。
+- 身体是否还会直接蹲住不动。
+
 ## 2026-06-17: yaw-step-cycle-v4
 
 状态：本地验证通过，已同步云端并通过云端编译，随本次提交推送 GitHub。
