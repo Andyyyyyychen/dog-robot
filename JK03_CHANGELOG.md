@@ -29,6 +29,188 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-17: yaw-step-cycle-v4
+
+状态：本地验证通过，已同步云端并通过云端编译，随本次提交推送 GitHub。
+
+### 为什么修改
+
+用户实测反馈：仍不能稳定抬腿转向，转到约 45 度时关节会卡住。
+
+结合上一次 TensorBoard 到约 `step 1418` 的趋势：
+
+- `yaw_turn_feet_clearance` 已经到 `0.02` 左右，说明上一版确实让它开始产生抬轮。
+- `yaw_turn_air_time_deficit` 持续改善，说明“不抬腿”的情况减少。
+- 但 `yaw_turn_diagonal_step`、`feet_gait` 下降，`feet_slide` 持续变差。
+- 这说明策略学到的是“抬一点 + 滑一点”，不是干净的对角交替踏步。
+- 原来的 `yaw_turn_diagonal_step` / `yaw_turn_air_time_deficit` 用 `max(pair_0_phase, pair_1_phase)`，只要一组对角脚持续离地、另一组持续支撑，就可能得分。这会鼓励“单边对角相位卡住”，对应用户看到的 45 度附近关节卡死。
+
+本次修改目标：
+
+- 不再只奖励“有一组对角脚离地”。
+- 增加最大离地/最大支撑时间，超过时间后不给分或扣分，逼它换脚。
+- 增加 yaw 转向时空中轮子的切向摆动奖励，让它抬起来以后必须朝正确转向方向摆，而不是只抬一下。
+- 增强抗滑约束，减少“抬一点 + 滑一点”的投机策略。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 新增 `_bounded_phase_score`
+
+新增内部工具函数：
+
+```python
+_bounded_phase_score(time, min_time, max_time)
+```
+
+逻辑：
+
+- 小于 `min_time`：分数从 0 增长到 1。
+- 位于合理窗口：分数高。
+- 超过 `max_time`：分数下降到 0。
+
+目的：防止一组对角脚长时间离地或另一组长时间支撑，从而卡在一个相位不换脚。
+
+#### 2. 修改 `yaw_turn_diagonal_step`
+
+新增参数：
+
+```python
+max_air_time
+max_contact_time
+```
+
+原来只看：
+
+```python
+air_time / min_air_time
+contact_time / min_contact_time
+```
+
+现在改成：
+
+```python
+_bounded_phase_score(air_time, min_air_time, max_air_time)
+_bounded_phase_score(contact_time, min_contact_time, max_contact_time)
+```
+
+含义：一组对角脚可以离地，但不能一直离地；另一组可以支撑，但不能一直支撑。这样才会逼出周期性交替。
+
+#### 3. 修改 `yaw_turn_air_time_deficit`
+
+同样新增：
+
+```python
+max_air_time
+max_contact_time
+```
+
+原来只要存在一组对角离地/另一组支撑，惩罚就会降低。现在如果这个相位保持太久，得分会掉下来，惩罚会重新变大。
+
+#### 4. 新增 `yaw_turn_phase_timeout`
+
+新增惩罚函数：
+
+```python
+yaw_turn_phase_timeout(...)
+```
+
+算法：
+
+```python
+air_timeout = relu(air_time - max_air_time) / max_air_time
+contact_timeout = relu(contact_time - max_contact_time) / max_contact_time
+penalty = mean(air_timeout^2 + contact_timeout^2)
+```
+
+含义：yaw 命令下，如果某些轮子离地太久或支撑太久，就直接扣分。这个项是专门针对“转到 45 度卡住不换脚”的。
+
+#### 5. 新增 `yaw_turn_tangential_swing`
+
+新增奖励函数：
+
+```python
+yaw_turn_tangential_swing(...)
+```
+
+算法核心：
+
+```python
+tangent = [-foot_y, foot_x]
+signed_tangent_speed = dot(foot_velocity_xy, tangent_dir) * sign(yaw_command)
+reward = clearance * air_score * positive_tangential_speed * opposite_pair_contact
+```
+
+含义：yaw 转向时，空中的轮子不只是抬起来，还要沿着绕机身旋转的切向方向摆。这样奖励从“抬脚”升级为“抬脚并向正确转向方向迈步”。
+
+#### 6. Flat 权重调整
+
+调整：
+
+```python
+feet_slide.weight: -0.50 -> -0.70
+feet_gait.weight: 1.80 -> 2.20
+yaw_turn_feet_clearance.weight: 7.50 -> 6.50
+yaw_turn_feet_clearance.max_air_time: 0.32 -> 0.20
+yaw_turn_diagonal_step.weight: 5.50 -> 7.50
+yaw_turn_diagonal_step.max_air_time = 0.18
+yaw_turn_diagonal_step.max_contact_time = 0.24
+yaw_turn_air_time_deficit.max_air_time = 0.18
+yaw_turn_air_time_deficit.max_contact_time = 0.24
+yaw_turn_phase_timeout.weight = -2.50
+yaw_turn_tangential_swing.weight = 4.00
+yaw_turn_joint_posture_l2.weight: -0.75 -> -1.00
+```
+
+关键意图：
+
+- 不再继续单纯加大抬轮高度奖励，避免“只抬不走”。
+- 加强对角步态和切向摆腿。
+- 加强抗滑。
+- 加强 yaw 时 hipx 姿态约束，减少关节扭到卡住。
+
+#### 7. Flat-Yaw 专训权重调整
+
+调整：
+
+```python
+feet_slide.weight: -0.65 -> -0.90
+feet_gait.weight: 2.50 -> 3.00
+yaw_turn_feet_clearance.weight: 10.00 -> 8.50
+yaw_turn_diagonal_step.weight: 8.00 -> 10.00
+yaw_turn_air_time_deficit.weight: -5.00 -> -6.00
+yaw_turn_phase_timeout.weight = -4.00
+yaw_turn_tangential_swing.weight = 6.00
+yaw_turn_joint_posture_l2.weight: -0.55 -> -1.00
+```
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum。
+- 没有修改 terrain level 算法。
+
+### 已知风险
+
+- 这版会更强地限制“吊脚不换”和“滑着转”，训练早期 reward 可能下降。
+- 如果约束太强，策略可能短时间更保守，需要重新从头训练观察。
+- 旧 checkpoint 不能直接代表新 reward 效果，建议新开 run。
+
+### 下一步观察指标
+
+- `yaw_turn_phase_timeout`：应该逐步接近 0。
+- `yaw_turn_tangential_swing`：应该逐步上升。
+- `yaw_turn_diagonal_step`：应该回升并稳定高于 `0.14`。
+- `feet_slide`：不能继续低于 `-0.70`。
+- 视频中应该看到对角脚轮交替抬起，而不是一组对角脚一直吊着。
+
 ## 2026-06-17: flat-yaw-lift-aggressive-v3
 
 状态：本地验证通过，已同步云端并通过云端编译，已提交并推送 GitHub。

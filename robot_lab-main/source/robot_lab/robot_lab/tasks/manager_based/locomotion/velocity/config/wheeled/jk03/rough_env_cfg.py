@@ -280,6 +280,40 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_turn_phase_timeout = RewTerm(
+        func=mdp.yaw_turn_phase_timeout,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "synced_feet_pair_names": (("", ""), ("", "")),
+            "max_air_time": 0.18,
+            "max_contact_time": 0.24,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
+    yaw_turn_tangential_swing = RewTerm(
+        func=mdp.yaw_turn_tangential_swing,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "min_height": -0.35,
+            "target_height": -0.29,
+            "min_air_time": 0.015,
+            "max_air_time": 0.18,
+            "min_contact_time": 0.015,
+            "max_contact_time": 0.24,
+            "tanh_mult": 3.0,
+            "synced_feet_pair_names": (("", ""), ("", "")),
+            "asset_cfg": SceneEntityCfg("robot", body_names=""),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):

@@ -331,6 +331,14 @@ def _upright_scale(env: ManagerBasedRLEnv) -> torch.Tensor:
     return torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
 
 
+def _bounded_phase_score(time: torch.Tensor, min_time: float, max_time: float | None = None) -> torch.Tensor:
+    """Score a contact/air phase while discouraging phases that last too long."""
+    score = torch.clamp(time / max(min_time, 1.0e-6), min=0.0, max=1.0)
+    if max_time is not None:
+        score *= torch.clamp((max_time - time) / max(max_time - min_time, 1.0e-6), min=0.0, max=1.0)
+    return score
+
+
 def _root_step_delta(
     env: ManagerBasedRLEnv, asset: RigidObject, cache_name: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -681,6 +689,8 @@ def yaw_turn_diagonal_step(
     min_air_time: float,
     min_contact_time: float,
     phase_balance_weight: float,
+    max_air_time: float | None = None,
+    max_contact_time: float | None = None,
 ) -> torch.Tensor:
     """Reward diagonal swing/support phases during near-in-place yaw turns."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
@@ -695,13 +705,13 @@ def yaw_turn_diagonal_step(
     air_time = contact_sensor.data.current_air_time[:, body_ids]
     contact_time = contact_sensor.data.current_contact_time[:, body_ids]
 
-    pair_0_air = torch.mean(torch.clamp(air_time[:, 0:2] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
-    pair_1_air = torch.mean(torch.clamp(air_time[:, 2:4] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_0_air = torch.mean(_bounded_phase_score(air_time[:, 0:2], min_air_time, max_air_time), dim=1)
+    pair_1_air = torch.mean(_bounded_phase_score(air_time[:, 2:4], min_air_time, max_air_time), dim=1)
     pair_0_contact = torch.mean(
-        torch.clamp(contact_time[:, 0:2] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+        _bounded_phase_score(contact_time[:, 0:2], min_contact_time, max_contact_time), dim=1
     )
     pair_1_contact = torch.mean(
-        torch.clamp(contact_time[:, 2:4] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+        _bounded_phase_score(contact_time[:, 2:4], min_contact_time, max_contact_time), dim=1
     )
 
     pair_0_swing = pair_0_air * pair_1_contact
@@ -723,6 +733,8 @@ def yaw_turn_air_time_deficit(
     synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]],
     min_air_time: float,
     min_contact_time: float,
+    max_air_time: float | None = None,
+    max_contact_time: float | None = None,
 ) -> torch.Tensor:
     """Penalize yaw turns that do not create a diagonal swing/support phase."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
@@ -737,13 +749,13 @@ def yaw_turn_air_time_deficit(
     air_time = contact_sensor.data.current_air_time[:, body_ids]
     contact_time = contact_sensor.data.current_contact_time[:, body_ids]
 
-    pair_0_air = torch.mean(torch.clamp(air_time[:, 0:2] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
-    pair_1_air = torch.mean(torch.clamp(air_time[:, 2:4] / max(min_air_time, 1.0e-6), min=0.0, max=1.0), dim=1)
+    pair_0_air = torch.mean(_bounded_phase_score(air_time[:, 0:2], min_air_time, max_air_time), dim=1)
+    pair_1_air = torch.mean(_bounded_phase_score(air_time[:, 2:4], min_air_time, max_air_time), dim=1)
     pair_0_contact = torch.mean(
-        torch.clamp(contact_time[:, 0:2] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+        _bounded_phase_score(contact_time[:, 0:2], min_contact_time, max_contact_time), dim=1
     )
     pair_1_contact = torch.mean(
-        torch.clamp(contact_time[:, 2:4] / max(min_contact_time, 1.0e-6), min=0.0, max=1.0), dim=1
+        _bounded_phase_score(contact_time[:, 2:4], min_contact_time, max_contact_time), dim=1
     )
 
     pair_0_swing_support = pair_0_air * pair_1_contact
@@ -753,6 +765,99 @@ def yaw_turn_air_time_deficit(
     penalty *= active_command.float()
     penalty *= _upright_scale(env)
     return penalty
+
+
+def yaw_turn_phase_timeout(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]],
+    max_air_time: float,
+    max_contact_time: float,
+) -> torch.Tensor:
+    """Penalize yaw turns that hold the same diagonal swing/support phase too long."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    pair_0 = list(contact_sensor.find_bodies(synced_feet_pair_names[0])[0])
+    pair_1 = list(contact_sensor.find_bodies(synced_feet_pair_names[1])[0])
+    body_ids = pair_0 + pair_1
+    air_time = contact_sensor.data.current_air_time[:, body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, body_ids]
+
+    air_timeout = torch.relu(air_time - max_air_time) / max(max_air_time, 1.0e-6)
+    contact_timeout = torch.relu(contact_time - max_contact_time) / max(max_contact_time, 1.0e-6)
+    penalty = torch.mean(torch.square(air_timeout) + torch.square(contact_timeout), dim=1)
+    penalty *= active_command.float()
+    penalty *= _upright_scale(env)
+    return penalty
+
+
+def yaw_turn_tangential_swing(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    min_height: float,
+    target_height: float,
+    min_air_time: float,
+    max_air_time: float,
+    min_contact_time: float,
+    max_contact_time: float,
+    tanh_mult: float,
+    synced_feet_pair_names: tuple[tuple[str, str], tuple[str, str]],
+) -> torch.Tensor:
+    """Reward lifted diagonal wheels that swing in the commanded yaw direction."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command = command[:, 2]
+    yaw_command_abs = torch.abs(yaw_command)
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    asset_pair_0 = list(asset.find_bodies(synced_feet_pair_names[0])[0])
+    asset_pair_1 = list(asset.find_bodies(synced_feet_pair_names[1])[0])
+    sensor_pair_0 = list(contact_sensor.find_bodies(synced_feet_pair_names[0])[0])
+    sensor_pair_1 = list(contact_sensor.find_bodies(synced_feet_pair_names[1])[0])
+    asset_body_ids = asset_pair_0 + asset_pair_1
+    sensor_body_ids = sensor_pair_0 + sensor_pair_1
+
+    foot_pos_translated = asset.data.body_pos_w[:, asset_body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    foot_vel_translated = asset.data.body_lin_vel_w[:, asset_body_ids, :] - asset.data.root_lin_vel_w[:, :].unsqueeze(1)
+    foot_pos_b = torch.zeros(env.num_envs, len(asset_body_ids), 3, device=env.device)
+    foot_vel_b = torch.zeros_like(foot_pos_b)
+    for i in range(len(asset_body_ids)):
+        foot_pos_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
+        foot_vel_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, foot_vel_translated[:, i, :])
+
+    height_span = max(target_height - min_height, 1.0e-6)
+    clearance = torch.clamp((foot_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
+    air_time = contact_sensor.data.current_air_time[:, sensor_body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, sensor_body_ids]
+    air_score = _bounded_phase_score(air_time, min_air_time, max_air_time)
+    contact_score = _bounded_phase_score(contact_time, min_contact_time, max_contact_time)
+
+    tangent = torch.stack((-foot_pos_b[:, :, 1], foot_pos_b[:, :, 0]), dim=2)
+    tangent_norm = torch.linalg.norm(tangent, dim=2, keepdim=True)
+    tangent_dir = tangent / torch.clamp(tangent_norm, min=1.0e-6)
+    signed_tangent_speed = torch.sum(foot_vel_b[:, :, :2] * tangent_dir, dim=2) * torch.sign(yaw_command).unsqueeze(1)
+    swing_direction_score = torch.tanh(tanh_mult * torch.clamp(signed_tangent_speed, min=0.0))
+
+    swing_score = clearance * air_score * swing_direction_score
+    pair_0_swing = torch.mean(swing_score[:, 0:2], dim=1) * torch.mean(contact_score[:, 2:4], dim=1)
+    pair_1_swing = torch.mean(swing_score[:, 2:4], dim=1) * torch.mean(contact_score[:, 0:2], dim=1)
+    reward = torch.maximum(pair_0_swing, pair_1_swing)
+    reward *= active_command.float()
+    reward *= _upright_scale(env)
+    return reward
 
 
 class GaitReward(ManagerTermBase):
