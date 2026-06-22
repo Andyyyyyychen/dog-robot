@@ -83,6 +83,18 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_wheel_velocity_alignment = RewTerm(
+        func=mdp.yaw_wheel_velocity_alignment,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 1.2,
+            "target_wheel_diff": 5.0,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
     commanded_base_height_below_target = RewTerm(
         func=mdp.commanded_base_height_below_target,
         weight=0.0,

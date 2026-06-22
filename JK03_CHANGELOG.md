@@ -29,6 +29,183 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: flat-yaw-wheel-alignment-v7
+
+状态：本地静态编译通过；目标是解决 flat 测试中“Z/X yaw 最多拧到约 45 度后卡住，不能持续原地转”的问题。
+
+### 为什么修改
+
+用户实测反馈：
+
+- 现在 JK03 仍然不能稳定原地转向。
+- yaw 时最多靠关节/机身姿态拧一下，转到约 45 度后卡住。
+- 说明上一版虽然加强了 yaw 奖励和 hipx 姿态约束，但策略仍然没有学到“用左右轮差速持续制造 yaw”的基础动作。
+
+判断原因：
+
+- `yaw_wheel_differential_progress` 需要“左右轮有差速，并且身体已经按命令方向转起来”才给奖励。训练早期如果身体还没有转起来，这个奖励太稀疏。
+- 普通 flat 里的 yaw 专项奖励只在 xy 命令很小的时候启用，随机训练中纯 yaw 样本比例较低，导致键盘 Z/X 对应的原地 yaw 学得不够。
+- `yaw_turn_joint_posture_l2` 太强时会把 yaw 探索压住；太弱时又会靠 hipx 拧腿。本版改为用轮速方向奖励主导 yaw，而不是继续堆 hipx 惩罚。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 新增 `yaw_wheel_velocity_alignment`
+
+新增 reward 函数：
+
+```python
+yaw_wheel_velocity_alignment(...)
+```
+
+逻辑：
+
+- 读取 yaw 命令 `command[:, 2]`。
+- 读取四个轮子的关节速度。
+- 计算左侧轮平均速度：`fl + hl`。
+- 计算右侧轮平均速度：`fr + hr`。
+- 对正 yaw 命令，奖励 `right_wheel_vel - left_wheel_vel` 为正。
+- 对负 yaw 命令，奖励 `right_wheel_vel - left_wheel_vel` 为负。
+- 这个奖励不要求身体已经转起来，只要求轮子先做出正确方向的差速。
+
+含义：先教会策略“Z/X yaw 时轮子该怎么转”，再由 `yaw_wheel_differential_progress` 和 `track_ang_vel_z_exp` 要求身体真的跟着转。
+
+#### 2. 注册新 reward
+
+在 `JK03RewardsCfg` 中新增：
+
+```python
+yaw_wheel_velocity_alignment = RewTerm(...)
+```
+
+默认权重为 `0.0`，只在 flat / flat-yaw 里打开。
+
+#### 3. 普通 flat 中打开轮速方向奖励
+
+普通 `JK03FlatEnvCfg`：
+
+```python
+yaw_wheel_velocity_alignment.weight = 2.00
+yaw_wheel_velocity_alignment.max_xy_command = 1.20
+yaw_wheel_velocity_alignment.target_wheel_diff = 5.0
+```
+
+含义：不只在完全原地 yaw 时给轮差速方向奖励，只要 yaw 命令存在且 xy 命令没有超过训练范围，就给策略更密集的转向学习信号。
+
+#### 4. 调整 yaw 相关权重
+
+普通 flat：
+
+```python
+track_ang_vel_z_exp.weight: 3.0 -> 2.4
+yaw_command_progress.weight: 0.85 -> 0.75
+yaw_wheel_differential_progress.weight: 1.20 -> 1.00
+yaw_wheel_differential_progress.max_xy_command: 0.16 -> 1.20
+yaw_stuck_with_command.weight: -6.0 -> -8.0
+```
+
+含义：
+
+- 不继续单纯加大身体 yaw 奖励，避免策略靠拧关节骗一点 yaw。
+- 增强“有 yaw 命令但身体不转”的惩罚。
+- 让轮差速 reward 在更多 yaw 样本中生效。
+
+#### 5. 放松会卡死 yaw 探索的姿态惩罚
+
+普通 flat：
+
+```python
+yaw_turn_joint_posture_l2.weight: -1.20 -> -0.45
+joint_pos_penalty.weight: -0.35 -> -0.25
+joint_deviation_hipx_l1.weight: -0.22 -> -0.25
+```
+
+含义：
+
+- `yaw_turn_joint_posture_l2` 从强约束改成温和约束，避免一边要求 yaw、一边把所有 yaw 探索压死。
+- `joint_deviation_hipx_l1` 稍微加强，继续压住大幅 hipx 拧腿。
+- `joint_pos_penalty` 略微放松，让腿部能配合轮子做必要支撑，而不是僵住。
+
+#### 6. 适当放开轮子速度动作
+
+普通 flat：
+
+```python
+self.actions.joint_vel.scale: 12.0 -> 16.0
+```
+
+含义：JK03 质量较大，原地 yaw 需要更明显的左右轮速度差。轮子速度动作太小会导致策略即使想转也推不动。
+
+#### 7. 调整脚滑惩罚
+
+普通 flat：
+
+```python
+feet_slide.weight: -0.85 -> -0.70
+yaw_slide_scale: 0.25 -> 0.15
+```
+
+含义：直线和平移仍然惩罚滑动，但 yaw 时允许必要的轮/脚切向运动，避免转向刚开始就被脚滑惩罚压住。
+
+#### 8. Flat-Yaw 专项同步调整
+
+`JK03FlatYawEnvCfg`：
+
+```python
+track_ang_vel_z_exp.weight: 3.5 -> 2.8
+yaw_command_progress.weight: 1.00 -> 0.90
+yaw_wheel_differential_progress.weight: 1.50 -> 1.20
+yaw_wheel_velocity_alignment.weight = 2.50
+yaw_stuck_with_command.weight: -7.0 -> -8.0
+feet_slide.weight: -0.70 -> -0.55
+yaw_slide_scale: 0.20 -> 0.15
+joint_pos_penalty.weight: -0.35 -> -0.25
+yaw_turn_joint_posture_l2.weight: -1.40 -> -0.45
+```
+
+含义：Flat-Yaw 仍然是专门练原地 yaw 的任务，但本版核心目标从“强制抬腿/强制姿态”改成“轮子先学会正确差速，身体再持续 yaw”。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py` 中任何 JK03 初始物理参数。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum 算法。
+- 没有修改 rough 的 terrain level 计算逻辑。
+- 没有恢复强制抬腿/对角踏步奖励。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 受保护文件 diff 为空：
+  - `jk03.py`
+  - `jk03.urdf`
+  - `velocity_env_cfg.py`
+  - `curriculums.py`
+
+### 已知风险
+
+- 如果实际轮子正负方向和这里推断相反，`yaw_wheel_velocity_alignment` 会给错方向奖励；此时训练中 `yaw_wheel_velocity_alignment` 可能上升但 `track_ang_vel_z_exp` 不上升，需要把左右轮差速符号反过来。
+- 轮子速度动作增大后，早期可能出现轮子转得更猛、`feet_slide` 短期变差；关键要看 `track_ang_vel_z_exp` 和 `yaw_stuck_with_command` 是否明显改善。
+- 这一版仍然不是楼梯抬腿方案，目标是先让 flat 中 Z/X 可以持续 yaw，最好能原地持续转圈。
+
+### 下一步观察指标
+
+- `yaw_wheel_velocity_alignment` 是否快速变成稳定正值。
+- `yaw_wheel_differential_progress` 是否随后上升。
+- `track_ang_vel_z_exp` 是否上升。
+- `yaw_stuck_with_command` 绝对值是否下降。
+- `joint_deviation_hipx_l1` 是否没有明显变大。
+- play 测试中 `base_wz` 是否能在按住 Z/X 时持续非零，而不是只转到约 45 度就停。
+
 ## 2026-06-22: flat-yaw-differential-v6
 
 状态：本地静态编译通过；未修改 JK03 原始参数、URDF、terrain curriculum。

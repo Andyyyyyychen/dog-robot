@@ -236,6 +236,34 @@ def yaw_wheel_differential_progress(
     return reward
 
 
+def yaw_wheel_velocity_alignment(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    target_wheel_diff: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward left/right wheel velocity difference that matches the commanded yaw direction."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_yaw = command[:, 2]
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_active = torch.logical_and(
+        torch.abs(command_yaw) > command_threshold,
+        command_xy_norm <= max_xy_command,
+    )
+
+    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    left_wheel_vel = torch.mean(wheel_vel[:, [0, 2]], dim=1)
+    right_wheel_vel = torch.mean(wheel_vel[:, [1, 3]], dim=1)
+    signed_wheel_diff = torch.sign(command_yaw) * (right_wheel_vel - left_wheel_vel)
+    reward = torch.clamp(signed_wheel_diff / max(target_wheel_diff, 1.0e-6), min=0.0, max=1.0)
+    reward *= yaw_command_active.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def commanded_base_height_below_target(
     env: ManagerBasedRLEnv,
     command_name: str,
