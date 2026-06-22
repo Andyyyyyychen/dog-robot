@@ -29,6 +29,164 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: flat-yaw-differential-v6
+
+状态：本地静态编译通过；未修改 JK03 原始参数、URDF、terrain curriculum。
+
+### 为什么修改
+
+用户实测反馈：普通 flat 训练/测试时仍然不能正常原地转向，按 yaw 后最多把腿部/hipx 关节拧到约 45 度，然后卡住不再继续转。
+
+判断原因：
+
+- 原来的 yaw 奖励主要看身体 yaw 角速度，没有明确告诉策略“用左右轮反向差速来制造 yaw”。
+- `yaw_stuck_with_command` 只惩罚没转起来，但没有奖励正确的轮子差速动作。
+- `feet_slide` 在原地 yaw 时会把轮/脚绕身体中心产生的切向速度也算成滑动，导致“想转就被脚滑惩罚拉住”。
+- 腿部 position action 没有在 flat 里收紧 clip，策略仍可能输出很大的 hipx 目标角，用拧腿去尝试转向。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 新增 `yaw_wheel_differential_progress`
+
+新增 reward 函数：
+
+```python
+yaw_wheel_differential_progress(...)
+```
+
+逻辑：
+
+- 只在 yaw 命令明显、xy 平移命令很小时启用。
+- 读取 4 个轮子关节速度。
+- 计算左侧轮平均速度和右侧轮平均速度的差值。
+- 同时要求身体 yaw 角速度方向和命令方向一致。
+- 只有“左右轮速度有差 + 身体真的按命令方向转起来”才给奖励。
+
+含义：把原来的“你要转起来”变成更明确的“你要靠左右轮差速转起来”，减少靠 hipx 拧腿骗 yaw 的可能。
+
+#### 2. `feet_slide` 增加 yaw 降权参数
+
+给 `feet_slide` 增加可选参数：
+
+```python
+command_name
+yaw_command_threshold
+max_xy_command
+yaw_slide_scale
+```
+
+逻辑：
+
+- 普通前进、后退、左右平移时，脚滑惩罚照常生效。
+- 当命令是接近原地 yaw 时，脚滑惩罚乘以 `yaw_slide_scale`。
+
+含义：原地转向时轮子/脚相对身体有切向速度，这是差速转弯必然出现的运动，不能完全按直线行走的脚滑标准惩罚。
+
+#### 3. flat 限制腿部 action clip
+
+新增：
+
+```python
+self.actions.joint_pos.clip = {".*": (-1.0, 1.0)}
+```
+
+含义：腿部 position action 不再允许输出非常大的目标角。结合 hipx scale `0.06`，正常情况下 hipx 目标偏移会被限制在约 `+-0.06 rad`，避免继续出现“拧到 45 度左右卡住”的动作模式。
+
+#### 4. flat 增强 yaw 真实转动奖励
+
+普通 flat：
+
+```python
+track_ang_vel_z_exp.weight: 1.8 -> 3.0
+yaw_command_progress.weight: 0.35 -> 0.85
+yaw_wheel_differential_progress.weight: 0 -> 1.20
+yaw_stuck_with_command.weight: -4.0 -> -6.0
+```
+
+Yaw 专项 flat：
+
+```python
+track_ang_vel_z_exp.weight: 1.2 -> 3.5
+yaw_command_progress.weight: 0.20 -> 1.00
+yaw_wheel_differential_progress.weight: 0 -> 1.50
+yaw_stuck_with_command.weight: -5.0 -> -7.0
+```
+
+含义：让 yaw 命令下“真实身体角速度”和“轮差速”成为更强目标。
+
+#### 5. yaw 时加强 hipx 姿态约束
+
+普通 flat：
+
+```python
+yaw_turn_joint_posture_l2.weight: -0.25 -> -1.20
+joint_deviation_hipx_l1.weight: -0.15 -> -0.22
+```
+
+Yaw 专项 flat：
+
+```python
+yaw_turn_joint_posture_l2.weight: -0.25 -> -1.40
+```
+
+含义：yaw 时更明确地告诉策略不要靠 hipx 大幅摆动/拧腿来转。
+
+#### 6. yaw 时降低脚滑惩罚
+
+普通 flat：
+
+```python
+feet_slide.weight: -1.00 -> -0.85
+yaw_slide_scale = 0.25
+```
+
+Yaw 专项 flat：
+
+```python
+feet_slide.weight: -1.20 -> -0.70
+yaw_slide_scale = 0.20
+```
+
+含义：保留基础防滑，但不要让原地 yaw 被脚滑惩罚彻底压住。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py` 中任何 JK03 初始物理参数。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum 算法。
+- 没有修改 rough 的 terrain level 计算逻辑。
+- 没有恢复强制抬腿/对角踏步奖励，当前目标仍是先把 flat 的基础 yaw 转起来。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 受保护文件 diff 为空。
+
+### 已知风险
+
+- 如果轮子关节速度正负方向和预期不同，新 reward 仍然不会直接写死正负方向，而是用“轮速差值 + 身体真实 yaw 方向”避免符号写反；但训练初期可能需要重新探索轮差速动作。
+- 由于限制了腿部 action clip，flat 上会更难出现夸张扭腿，但如果后续 rough 需要大幅抬腿，不能直接把 flat 的 clip 原样套到 rough。
+- 这一版目标是解决“拧 45 度卡住”，不是一步到位解决楼梯抬腿。
+
+### 下一步观察指标
+
+- `track_ang_vel_z_exp` 是否上升。
+- `yaw_wheel_differential_progress` 是否从 0 变为稳定正值。
+- `yaw_stuck_with_command` 绝对值是否下降。
+- `yaw_turn_joint_posture_l2` 和 `joint_deviation_hipx_l1` 是否下降。
+- `feet_slide` 是否没有因为 yaw 放开而突然发散。
+- play 测试里 `base_wz` 是否能持续跟随 Z/X，而不是只扭一下腿。
+
 ## 2026-06-18: flat-basic-motion-v5
 
 状态：本地验证通过，已同步云端并通过云端编译，随本次提交推送 GitHub。

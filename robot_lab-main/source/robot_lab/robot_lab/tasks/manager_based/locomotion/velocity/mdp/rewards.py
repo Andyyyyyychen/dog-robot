@@ -202,6 +202,40 @@ def yaw_command_progress(
     return reward
 
 
+def yaw_wheel_differential_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    max_yaw_rate: float,
+    target_wheel_diff: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward in-place yaw that is produced with left/right wheel speed difference."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_yaw = command[:, 2]
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_active = torch.logical_and(
+        torch.abs(command_yaw) > command_threshold,
+        command_xy_norm <= max_xy_command,
+    )
+
+    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    left_wheel_vel = torch.mean(wheel_vel[:, [0, 2]], dim=1)
+    right_wheel_vel = torch.mean(wheel_vel[:, [1, 3]], dim=1)
+    wheel_diff_score = torch.clamp(
+        torch.abs(right_wheel_vel - left_wheel_vel) / max(target_wheel_diff, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    signed_yaw_rate = torch.sign(command_yaw) * asset.data.root_ang_vel_b[:, 2]
+    yaw_progress_score = torch.clamp(signed_yaw_rate / max(max_yaw_rate, 1.0e-6), min=0.0, max=1.0)
+    reward = wheel_diff_score * yaw_progress_score * yaw_command_active.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def commanded_base_height_below_target(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -1268,7 +1302,13 @@ def feet_height_body(
 
 
 def feet_slide(
-    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
+    yaw_command_threshold: float = 0.08,
+    max_xy_command: float = 0.18,
+    yaw_slide_scale: float = 1.0,
 ) -> torch.Tensor:
     """Penalize feet sliding.
 
@@ -1296,6 +1336,13 @@ def feet_slide(
         env.num_envs, -1
     )
     reward = torch.sum(foot_leteral_vel * contacts, dim=1)
+    if command_name is not None:
+        command = env.command_manager.get_command(command_name)
+        yaw_turn_active = torch.logical_and(
+            torch.abs(command[:, 2]) > yaw_command_threshold,
+            torch.linalg.norm(command[:, :2], dim=1) <= max_xy_command,
+        )
+        reward = torch.where(yaw_turn_active, yaw_slide_scale * reward, reward)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 

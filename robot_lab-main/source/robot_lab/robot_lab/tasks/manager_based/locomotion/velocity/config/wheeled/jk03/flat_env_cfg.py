@@ -49,17 +49,24 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
             ".*_hipy_joint": 0.17,
             ".*_knee_joint": 0.17,
         }
-        self.actions.joint_vel.scale = 10.0
+        self.actions.joint_pos.clip = {".*": (-1.0, 1.0)}
+        self.actions.joint_vel.scale = 12.0
 
         self.rewards.flat_orientation_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.15
         self.rewards.base_height_l2.weight = -1.0
         self.rewards.base_height_l2.params["target_height"] = 0.456
         self.rewards.track_lin_vel_xy_exp.weight = 9.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.8
-        self.rewards.yaw_command_progress.weight = 0.35
+        self.rewards.track_ang_vel_z_exp.weight = 3.0
+        self.rewards.yaw_command_progress.weight = 0.85
         self.rewards.yaw_command_progress.params["command_threshold"] = 0.06
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.70
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.85
+        self.rewards.yaw_wheel_differential_progress.weight = 1.20
+        self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.06
+        self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 0.16
+        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.85
+        self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 5.0
+        self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.commanded_base_height_below_target.weight = -3.5
         self.rewards.commanded_base_height_below_target.params["target_height"] = 0.456
         self.rewards.commanded_base_height_below_target.params["height_margin"] = 0.06
@@ -76,22 +83,26 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.front_joint_posture_l2.params["asset_cfg"].joint_names = [
             "fl_hipy_joint", "fl_knee_joint", "fr_hipy_joint", "fr_knee_joint",
         ]
-        self.rewards.yaw_turn_joint_posture_l2.weight = -0.25
+        self.rewards.yaw_turn_joint_posture_l2.weight = -1.20
         self.rewards.yaw_turn_joint_posture_l2.params["command_threshold"] = 0.06
         self.rewards.yaw_turn_joint_posture_l2.params["yaw_command_only"] = True
-        self.rewards.yaw_turn_joint_posture_l2.params["max_xy_command"] = 0.18
+        self.rewards.yaw_turn_joint_posture_l2.params["max_xy_command"] = 0.16
         self.rewards.yaw_turn_joint_posture_l2.params["asset_cfg"].joint_names = ".*_hipx_joint"
-        self.rewards.joint_deviation_hipx_l1.weight = -0.15
+        self.rewards.joint_deviation_hipx_l1.weight = -0.22
         self.rewards.joint_pos_penalty.weight = -0.35
         self.rewards.action_rate_l2.weight = -0.002
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
-        self.rewards.feet_slide.weight = -1.00
+        self.rewards.feet_slide.weight = -0.85
+        self.rewards.feet_slide.params["command_name"] = "base_velocity"
+        self.rewards.feet_slide.params["yaw_command_threshold"] = 0.06
+        self.rewards.feet_slide.params["max_xy_command"] = 0.16
+        self.rewards.feet_slide.params["yaw_slide_scale"] = 0.25
         self.rewards.feet_height_body.weight = 0
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
-        self.rewards.yaw_stuck_with_command.weight = -4.0
+        self.rewards.yaw_stuck_with_command.weight = -6.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.rewards.wheel_spin_when_stuck.weight = 0
@@ -220,10 +231,14 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.commands.base_velocity.ranges.heading = (-0.9, 0.9)
 
         self.rewards.track_lin_vel_xy_exp.weight = 4.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.2
-        self.rewards.yaw_command_progress.weight = 0.20
-        self.rewards.yaw_stuck_with_command.weight = -5.0
-        self.rewards.feet_slide.weight = -1.20
+        self.rewards.track_ang_vel_z_exp.weight = 3.5
+        self.rewards.yaw_command_progress.weight = 1.00
+        self.rewards.yaw_wheel_differential_progress.weight = 1.50
+        self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.yaw_stuck_with_command.weight = -7.0
+        self.rewards.feet_slide.weight = -0.70
+        self.rewards.feet_slide.params["command_name"] = "base_velocity"
+        self.rewards.feet_slide.params["yaw_slide_scale"] = 0.20
         self.rewards.feet_gait.weight = 0
         self.rewards.yaw_turn_feet_clearance.weight = 0
         self.rewards.yaw_turn_diagonal_step.weight = 0
@@ -231,7 +246,7 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.yaw_turn_phase_timeout.weight = 0
         self.rewards.yaw_turn_tangential_swing.weight = 0
         self.rewards.joint_pos_penalty.weight = -0.35
-        self.rewards.yaw_turn_joint_posture_l2.weight = -0.25
+        self.rewards.yaw_turn_joint_posture_l2.weight = -1.40
 
         if self.__class__.__name__ == "JK03FlatYawEnvCfg":
             self.disable_zero_weight_rewards()
