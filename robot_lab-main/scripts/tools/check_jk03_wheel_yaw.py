@@ -103,9 +103,15 @@ def configure_diagnostic_env(env_cfg) -> None:
     if hasattr(env_cfg, "events"):
         for event_name in (
             "randomize_rigid_body_material",
+            "randomize_rigid_body_mass_base",
+            "randomize_rigid_body_mass_others",
             "randomize_rigid_body_mass",
+            "randomize_com_positions",
             "randomize_apply_external_force_torque",
+            "randomize_push_robot",
             "push_robot",
+            "randomize_reset_joints",
+            "randomize_actuator_gains",
         ):
             if hasattr(env_cfg.events, event_name):
                 setattr(env_cfg.events, event_name, None)
@@ -168,7 +174,7 @@ def run_phase(env, phase_name: str, wheel_pattern: tuple[float, float, float, fl
     zero_action = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
     action = build_action(env, wheel_pattern)
 
-    with torch.inference_mode():
+    with torch.no_grad():
         for _ in range(settle_steps):
             env.step(zero_action)
 

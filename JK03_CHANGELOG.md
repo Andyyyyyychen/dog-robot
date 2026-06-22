@@ -113,6 +113,17 @@ cd /root/dog-robot-main/robot_lab-main
 - 脚本默认轮子顺序按 `[FL, FR, RL, RR]` 解释；如果实际 action 顺序不同，`yaw_left/yaw_right` 的方向判断需要按输出重新校准。
 - 开环测试不是训练效果评估，只用于判断底层物理和动作映射是否支持轮式差速 yaw。
 
+### 2026-06-22 补充修复
+
+第一次云端运行时，`yaw_left` 已经测到 `yaw_delta=-23.37 deg`、`mean_wz=-0.3527 rad/s`，说明 JK03 在物理层面可以靠轮子差速产生 yaw。但脚本在第二个 phase reset 时触发 PyTorch `inference_mode` 与 Isaac Lab 内部 reset 写张量冲突。
+
+修复：
+
+- 将测试循环从 `torch.inference_mode()` 改成 `torch.no_grad()`，避免环境内部状态张量被标记成 inference tensor。
+- 诊断环境额外关闭 `randomize_rigid_body_mass_base`、`randomize_rigid_body_mass_others`、`randomize_com_positions`、`randomize_push_robot`、`randomize_reset_joints`、`randomize_actuator_gains`，减少开环测试中的随机因素。
+
+这次仍然没有修改 `jk03.py`、URDF、terrain curriculum、reward 权重或 PPO 配置。
+
 ## 2026-06-22: mature-wheeled-baseline-v9
 
 状态：本地静态编译通过；目标是停止继续叠加手写 yaw 奖励，回到成熟轮足基线，让 flat 先恢复稳定移动和标准 yaw 速度跟踪。
