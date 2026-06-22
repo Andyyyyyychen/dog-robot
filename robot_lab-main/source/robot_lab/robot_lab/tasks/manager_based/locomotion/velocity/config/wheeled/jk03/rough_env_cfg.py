@@ -137,6 +137,18 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_hipx_twist_without_yaw_progress = RewTerm(
+        func=mdp.yaw_hipx_twist_without_yaw_progress,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 1.2,
+            "yaw_velocity_threshold": 0.15,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
     wheel_spin_when_stuck = RewTerm(
         func=mdp.wheel_spin_when_stuck,
         weight=0.0,

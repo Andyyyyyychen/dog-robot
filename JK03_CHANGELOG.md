@@ -29,6 +29,185 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: flat-yaw-mature-wheel-baseline-v8
+
+状态：本地静态编译通过；目标是修正 v7 中“轮差速奖励上升，但实际 yaw 仍弱，并且继续拧 hipx 关节”的问题。
+
+### 为什么修改
+
+用户实测反馈：
+
+- 狗又回到拧关节转向。
+- Z/X yaw 仍然不能稳定持续转，转到一定角度就卡住。
+
+云端 TensorBoard 最新 run：`jk03_flat/2026-06-22_10-00-12`，latest step `762`。最近 3 个 200-step 窗口趋势显示：
+
+- `mean_reward`: `114.55 -> 124.62 -> 137.32`，总体奖励在上升。
+- `yaw_wheel_velocity_alignment`: `0.892 -> 1.117 -> 1.284`，v7 新增的轮速方向奖励明显上升。
+- `yaw_wheel_differential_progress`: `0.177 -> 0.364 -> 0.500`，轮差速相关奖励也上升。
+- 但 `error_vel_yaw`: `0.861 -> 0.751 -> 0.845`，当前窗口反而变差。
+- `track_ang_vel_z_exp`: `1.232 -> 1.335 -> 1.264`，当前窗口下降。
+- `feet_slide`: `-1.128 -> -1.172 -> -1.249`，脚滑/轮滑变差。
+- `joint_deviation_hipx_l1`: `-0.106 -> -0.150 -> -0.174`，hipx 偏离越来越大。
+
+判断：v7 的 `yaw_wheel_velocity_alignment` 确实教会了轮子做差速，但没有保证身体真实 yaw 跟上。策略利用了“轮子差速 + hipx 拧腿”的局部最优，导致指标上轮差速奖励很好看，实际表现仍然是拧关节。
+
+参考成熟轮足配置：
+
+- `unitree_go2w`、`unitree_b2w`、`deeprobotics_m20` 都使用较小轮速动作：`joint_vel.scale = 5.0`。
+- 它们的 `track_ang_vel_z_exp.weight` 通常为 `1.5`，不是很大。
+- 它们对腿部姿态用较强 `joint_pos_penalty.weight = -1.0`。
+- 它们对 wheeled foot 的 `feet_slide.weight = 0`，因为轮足机器人轮子在接触中滚动，直接用足端滑动惩罚容易误伤转向。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+#### 1. 新增 `yaw_hipx_twist_without_yaw_progress`
+
+新增 reward 函数：
+
+```python
+yaw_hipx_twist_without_yaw_progress(...)
+```
+
+逻辑：
+
+- 只在 yaw 命令明显时启用。
+- 读取 hipx 关节相对默认站姿的偏离。
+- 读取真实 body yaw rate。
+- 如果 hipx 偏离大，但真实 yaw rate 没有达到阈值，就惩罚。
+- 如果身体已经真实转起来，则这个惩罚自动减弱。
+
+含义：不是简单禁止 hipx 动，而是禁止“拧 hipx 但身体不转”的坏动作。
+
+#### 2. 注册新 reward
+
+在 `JK03RewardsCfg` 中新增：
+
+```python
+yaw_hipx_twist_without_yaw_progress = RewTerm(...)
+```
+
+默认权重为 `0.0`，只在 flat / flat-yaw 中打开。
+
+#### 3. 关闭 v7 的误导性轮速方向奖励
+
+普通 flat：
+
+```python
+yaw_wheel_velocity_alignment.weight: 2.00 -> 0
+```
+
+Flat-Yaw：
+
+```python
+yaw_wheel_velocity_alignment.weight: 2.50 -> 0
+```
+
+原因：报告证明它上升时，真实 yaw 跟踪没有同步上升，反而鼓励轮子差速/空转。
+
+#### 4. 降低轮差速 reward
+
+普通 flat：
+
+```python
+yaw_wheel_differential_progress.weight: 1.00 -> 0.25
+```
+
+Flat-Yaw：
+
+```python
+yaw_wheel_differential_progress.weight: 1.20 -> 0.35
+```
+
+含义：保留一点“轮差速辅助信号”，但不再让它主导策略。
+
+#### 5. 回到成熟轮足的轮速和 yaw 权重尺度
+
+普通 flat：
+
+```python
+joint_vel.scale: 16.0 -> 8.0
+track_ang_vel_z_exp.weight: 2.4 -> 1.6
+yaw_command_progress.weight: 0.55
+```
+
+Flat-Yaw：
+
+```python
+track_ang_vel_z_exp.weight: 2.8 -> 1.8
+yaw_command_progress.weight: 0.65
+```
+
+含义：避免过强轮速动作和过强 yaw 奖励把策略推向“高速轮转 + hipx 拧腿”的捷径。
+
+#### 6. 加强姿态稳定，关闭 feet_slide
+
+普通 flat：
+
+```python
+joint_pos_penalty.weight: -0.25 -> -0.90
+joint_deviation_hipx_l1.weight: -0.25 -> -0.55
+feet_slide.weight: -0.70 -> 0
+action_rate_l2.weight: -0.002 -> -0.01
+yaw_hipx_twist_without_yaw_progress.weight = -3.0
+```
+
+Flat-Yaw：
+
+```python
+joint_pos_penalty.weight: -0.25 -> -1.00
+feet_slide.weight: -0.55 -> 0
+yaw_hipx_twist_without_yaw_progress.weight = -3.5
+```
+
+含义：
+
+- 像成熟轮足配置一样，让腿部姿态正则更强。
+- 对轮足机器人先关闭 `feet_slide`，避免把轮子滚动误判成脚滑。
+- 用 targeted penalty 专门处理“拧 hipx 但 yaw 不动”。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py` 中任何 JK03 初始物理参数。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi 原始 terrain curriculum 算法。
+- 没有修改 rough 的 terrain level 计算逻辑。
+- 没有恢复强制抬腿/对角踏步奖励。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 受保护文件 diff 为空：
+  - `jk03.py`
+  - `jk03.urdf`
+  - `velocity_env_cfg.py`
+  - `curriculums.py`
+
+### 已知风险
+
+- 关闭 `feet_slide` 后，早期可能看不到脚滑指标约束，但这是参考成熟 wheeled 配置后的取舍。
+- 轮速动作从 `16.0` 降到 `8.0` 后，转向可能更慢，但应减少空转和姿态扭曲。
+- 如果仍然拧 hipx，下一步不应再调 reward，而应该做开环测试：直接给轮子速度命令，看仿真物理上能否原地 yaw。
+
+### 下一步观察指标
+
+- `error_vel_yaw` 是否下降。
+- `track_ang_vel_z_exp` 是否上升或至少稳定。
+- `joint_deviation_hipx_l1` 是否下降。
+- `yaw_hipx_twist_without_yaw_progress` 是否从高值下降。
+- `yaw_stuck_with_command` 是否继续下降。
+- play 中按 Z/X 时 `base_wz` 是否持续非零，而不是 hipx 拧到一定角度后停止。
+
 ## 2026-06-22: flat-yaw-wheel-alignment-v7
 
 状态：本地静态编译通过；目标是解决 flat 测试中“Z/X yaw 最多拧到约 45 度后卡住，不能持续原地转”的问题。

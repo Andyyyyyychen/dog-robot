@@ -326,6 +326,39 @@ def commanded_joint_posture_l2(
     return reward
 
 
+def yaw_hipx_twist_without_yaw_progress(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    yaw_velocity_threshold: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize hipx twisting during yaw commands when the body is not actually turning."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_yaw = command[:, 2]
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_active = torch.logical_and(
+        torch.abs(command_yaw) > command_threshold,
+        command_xy_norm <= max_xy_command,
+    )
+
+    signed_yaw_rate = torch.sign(command_yaw) * asset.data.root_ang_vel_b[:, 2]
+    poor_yaw_progress = torch.clamp(
+        (yaw_velocity_threshold - signed_yaw_rate) / max(yaw_velocity_threshold, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    hipx_error = torch.mean(
+        torch.abs(asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]),
+        dim=1,
+    )
+    reward = hipx_error * poor_yaw_progress * yaw_command_active.float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def wheel_spin_when_stuck(
     env: ManagerBasedRLEnv,
     command_name: str,
