@@ -50,27 +50,27 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
             ".*_knee_joint": 0.17,
         }
         self.actions.joint_pos.clip = {".*": (-1.0, 1.0)}
-        self.actions.joint_vel.scale = 5.0
+        self.actions.joint_vel.scale = 8.0
 
         self.rewards.flat_orientation_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.15
         self.rewards.base_height_l2.weight = -1.0
         self.rewards.base_height_l2.params["target_height"] = 0.456
-        self.rewards.track_lin_vel_xy_exp.weight = 4.5
-        self.rewards.track_ang_vel_z_exp.weight = 2.2
-        self.rewards.yaw_command_progress.weight = 1.2
-        self.rewards.yaw_command_progress.params["command_threshold"] = 0.06
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.45
-        self.rewards.yaw_wheel_differential_progress.weight = 0
-        self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.06
-        self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
-        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.85
-        self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 5.0
+        self.rewards.track_lin_vel_xy_exp.weight = 3.0
+        self.rewards.track_ang_vel_z_exp.weight = 4.0
+        self.rewards.yaw_command_progress.weight = 1.5
+        self.rewards.yaw_command_progress.params["command_threshold"] = 0.05
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.8
+        self.rewards.yaw_wheel_differential_progress.weight = 0.8
+        self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.05
+        self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 0.20
+        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.8
+        self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_wheel_velocity_alignment.weight = 0
-        self.rewards.yaw_wheel_velocity_alignment.params["command_threshold"] = 0.06
-        self.rewards.yaw_wheel_velocity_alignment.params["max_xy_command"] = 1.20
-        self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 5.0
+        self.rewards.yaw_wheel_velocity_alignment.weight = 0.5
+        self.rewards.yaw_wheel_velocity_alignment.params["command_threshold"] = 0.05
+        self.rewards.yaw_wheel_velocity_alignment.params["max_xy_command"] = 0.20
+        self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_velocity_alignment.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.commanded_base_height_below_target.weight = -2.0
         self.rewards.commanded_base_height_below_target.params["target_height"] = 0.456
@@ -112,9 +112,9 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
         self.rewards.stuck_with_command.params["velocity_threshold"] = 0.08
-        self.rewards.yaw_stuck_with_command.weight = -2.0
-        self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.08
-        self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
+        self.rewards.yaw_stuck_with_command.weight = -5.0
+        self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.05
+        self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.08
         self.rewards.wheel_spin_when_stuck.weight = 0
         self.rewards.wheel_spin_with_lateral_contact.weight = 0
         self.rewards.commanded_motion_progress.weight = 0
@@ -217,10 +217,10 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
 
         # Keyboard play uses arrows for x/y translation and Z/X for yaw.
         self.commands.base_velocity.heading_command = False
-        self.commands.base_velocity.ranges.lin_vel_x = (-0.8, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.45, 0.45)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.heading = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.4, 0.8)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.2, 0.2)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.8, 0.8)
+        self.commands.base_velocity.ranges.heading = (-0.8, 0.8)
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "JK03FlatEnvCfg":

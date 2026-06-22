@@ -29,6 +29,77 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: aggressive-flat-yaw-wheel-reward-v12
+
+状态：根据外部修改建议，将普通 `RobotLab-Isaac-Velocity-Flat-JK03-v0` 改成更强 yaw 学习版本。目标是先让 `X/Z` 能稳定产生真实机身 yaw，而不是只象征性拧 hipx。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+上一版 v11 已经恢复 `yaw_command_progress`，但云端/用户测试仍然显示：
+
+- `X/Z` 命令能进入，但狗仍主要表现为 hipx 轻微扭动。
+- 普通 Flat 里总 reward 能上升，但 yaw tracking 没明显改善。
+- 之前开环测试已经证明轮子差速在物理上可以让 JK03 转向，因此问题集中在 policy 没被足够强地引导去用轮子/身体 yaw。
+
+外部建议指出：普通 Flat 不是专门练原地转向的环境，仅靠 `track_ang_vel_z_exp` 很难学会 `vx=0, vy=0` 下的 yaw。因此这版直接加强普通 Flat 的 yaw 专项信号。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `self.actions.joint_vel.scale: 5.0 -> 8.0`
+  - 增大轮子速度动作尺度，让 policy 有足够轮速空间产生差速 yaw。
+- `track_lin_vel_xy_exp.weight: 4.5 -> 3.0`
+  - 降低前进/横移奖励对总 reward 的压制。
+- `track_ang_vel_z_exp.weight: 2.2 -> 4.0`
+  - 明确提高 yaw 角速度 tracking 的重要性。
+- `yaw_command_progress.weight: 1.2 -> 1.5`
+  - 强化“身体真的按 yaw 命令方向转起来”的奖励。
+- `yaw_command_progress.command_threshold: 0.06 -> 0.05`
+- `yaw_command_progress.max_yaw_rate: 0.45 -> 0.8`
+- `yaw_wheel_differential_progress.weight: 0 -> 0.8`
+  - 恢复轮子差速 yaw 奖励，但这个函数仍然乘了 `yaw_progress_score`，也就是只有身体真的朝命令方向转时才给主要奖励。
+- `yaw_wheel_differential_progress.max_xy_command: 1.20 -> 0.20`
+  - 只在接近原地 yaw 的命令下启用，避免污染正常前进/横移。
+- `yaw_wheel_differential_progress.target_wheel_diff: 5.0 -> 4.0`
+- `yaw_wheel_velocity_alignment.weight: 0 -> 0.5`
+  - 给较小的轮速方向引导，帮助早期探索左右轮应该反向。
+- `yaw_wheel_velocity_alignment.max_xy_command: 1.20 -> 0.20`
+  - 同样只服务于接近原地 yaw。
+- `yaw_wheel_velocity_alignment.target_wheel_diff: 5.0 -> 4.0`
+- `yaw_stuck_with_command.weight: -2.0 -> -5.0`
+  - 有 yaw 命令但机身 yaw 速度太小则更重罚。
+- `yaw_stuck_with_command.command_threshold: 0.08 -> 0.05`
+- `yaw_stuck_with_command.yaw_velocity_threshold: 0.06 -> 0.08`
+- 命令范围：
+  - `lin_vel_x: (-0.8, 1.0) -> (-0.4, 0.8)`
+  - `lin_vel_y: (-0.45, 0.45) -> (-0.2, 0.2)`
+  - `ang_vel_z: (-0.5, 0.5) -> (-0.8, 0.8)`
+  - `heading: (-0.5, 0.5) -> (-0.8, 0.8)`
+
+### 对建议的判断
+
+这套建议适合当前阶段，因为当前最大问题不是“转向不够优雅”，而是“policy 根本没有学会 yaw”。先用更强 yaw tracking、真实 yaw progress、轮差速方向引导把转向能力救回来，再讨论抬腿和减少滑动。
+
+### 风险
+
+- 这版可能更容易学会“轮子滚动/滑动式原地转向”，但未必立刻学会抬腿转向。
+- `yaw_wheel_velocity_alignment` 会奖励轮速方向，虽然权重只有 `0.5`，仍需监控是否出现轮子狂转但 `base_wz` 不涨。
+- 如果 `track_lin_vel_xy_exp` 降得太多，前进/横移可能短期变弱。
+
+### 后续观察指标
+
+- `error_vel_yaw` 是否下降。
+- `track_ang_vel_z_exp` 是否上升。
+- `yaw_command_progress` 是否出现并上升。
+- `yaw_wheel_differential_progress` 是否上升，同时 `base_wz` 在 play 中是否真正变大。
+- 如果能稳定滑动转向，再加入轻量横向滑动惩罚或 yaw 时抬轮奖励，不能一步到位压得太狠。
+
 ## 2026-06-22: yaw-progress-rebalance-v11
 
 状态：针对 `X/Z` 只能轻微拧 hipx、不能产生真实机身转向的问题，调整 flat / flat-yaw 的 yaw reward 与 yaw curriculum。没有修改 JK03 原始参数、URDF、terrain curriculum、PPO 结构。
