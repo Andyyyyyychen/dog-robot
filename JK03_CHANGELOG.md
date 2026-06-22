@@ -29,6 +29,92 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: soft-yaw-lift-shaping-v13
+
+状态：根据“第一轮修改建议”，把普通 `Flat-JK03-v0` 从强制 yaw/轮差速版本改成更温和的阶段 2 版本：中等 yaw tracking、轻微滑动惩罚、轻微抬轮/对角摆动奖励，不强制完整 FL+HR / FR+HL 对角交替节拍。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+用户反馈：之前训练到约 1700 step 已经能做滑地右转，但左转弱，且如果强行加入 FL+HR / FR+HL 对角交替 reward，动作会很怪，甚至不动。
+
+外部建议指出：
+
+- 强制对角步态 reward 太硬、太稀疏，容易让 PPO 早期选择“不动更安全”。
+- 当前 `yaw_turn_diagonal_step` 只奖励“某个对角组看起来在摆动”，不是一个真正的节拍器；它没有记忆上一拍和下一拍，因此可能学成抽搐式抬脚。
+- JK03 是轮腿，不一定适合直接强迫纯足式 trot。更合理的是先让四个轮/脚都参与、减少一直拖地，再逐步加对角节奏。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `track_ang_vel_z_exp.weight: 4.0 -> 2.0`
+  - yaw tracking 降回中等，避免为了 `base_wz` 继续走轮子狂滑捷径。
+- `yaw_command_progress.weight: 1.5 -> 0.5`
+  - 保留真实 yaw 进展奖励，但不压过其他姿态/接触目标。
+- `yaw_wheel_differential_progress.weight: 0.8 -> 0.2`
+  - 保留轮差速，但降低到辅助引导。
+- `yaw_wheel_velocity_alignment.weight: 0.5 -> 0.1`
+  - 只给很小的轮速方向提示，避免只学轮子差速不学身体动作。
+- `feet_slide.weight: 0 -> -0.05`
+  - 轻微惩罚轮/脚贴地横向拖动。
+- `feet_slide.yaw_slide_scale: 0.15 -> 0.3`
+  - yaw 原地转向时只轻微放大滑动惩罚，不一上来强罚。
+- `feet_slide.max_xy_command: 0.16 -> 0.12`
+  - 只在接近原地 yaw 时使用 yaw slide 缩放。
+- `yaw_turn_feet_clearance.weight: 0 -> 0.10`
+  - 轻微奖励 yaw 时有一点轮/脚离地和摆动。
+- `yaw_turn_feet_clearance.min_air_time: 0.010 -> 0.01`
+- `yaw_turn_feet_clearance.max_air_time: 0.20 -> 0.40`
+  - 放宽 air time，避免早期动作慢时拿不到奖励。
+- `yaw_turn_diagonal_step.weight: 0 -> 0.05`
+  - 只轻微奖励对角摆动，不强制节奏。
+- `yaw_turn_diagonal_step.min_air_time: 0.010 -> 0.01`
+- `yaw_turn_diagonal_step.min_contact_time: 0.012 -> 0.02`
+- `yaw_turn_diagonal_step.max_air_time: 0.18 -> 0.40`
+- `yaw_turn_diagonal_step.max_contact_time: 0.24 -> 0.70`
+  - 放宽对角步态相位窗口。
+- `yaw_turn_air_time_deficit.weight = 0`
+  - 保持关闭；第一轮不惩罚“不够对角”。
+- `yaw_turn_phase_timeout.weight = 0`
+  - 保持关闭；第一轮不惩罚“相位停太久”。
+- `yaw_turn_air_time_deficit / yaw_turn_phase_timeout` 的 max phase 参数同步放宽到 `0.40 / 0.70`，为后续小权重打开做准备。
+- `yaw_turn_tangential_swing.weight: 0 -> 0.05`
+  - 轻微奖励 lifted wheel 在 yaw 方向有切向摆动。
+- `yaw_turn_tangential_swing.min_air_time: 0.010 -> 0.01`
+- `yaw_turn_tangential_swing.max_air_time: 0.18 -> 0.40`
+- `yaw_turn_tangential_swing.min_contact_time: 0.012 -> 0.02`
+- `yaw_turn_tangential_swing.max_contact_time: 0.24 -> 0.70`
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有新增新的 reward 函数。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+
+### 预期效果
+
+- 不要求立刻出现标准对角 trot。
+- 允许它先保持能转，同时开始减少长期拖地滑动。
+- 期望 `feet_slide` 绝对惩罚不要突然变很大。
+- 期望 `yaw_turn_feet_clearance`、`yaw_turn_diagonal_step`、`yaw_turn_tangential_swing` 有小幅正值，但不能靠它们主导总 reward。
+
+### 后续计划
+
+如果这一版能稳定左右转，并且不再以前轮为固定支点长期拖地，再逐步尝试：
+
+- `yaw_turn_diagonal_step.weight: 0.05 -> 0.10`
+- `yaw_turn_air_time_deficit.weight: 0 -> -0.03`
+- `yaw_turn_phase_timeout.weight: 0 -> -0.02`
+
+如果这一版又变成不动，优先降低 `feet_slide` 或关闭 `yaw_turn_feet_clearance / diagonal / tangential`，不要继续加大惩罚。
+
 ## 2026-06-22: aggressive-flat-yaw-wheel-reward-v12
 
 状态：根据外部修改建议，将普通 `RobotLab-Isaac-Velocity-Flat-JK03-v0` 改成更强 yaw 学习版本。目标是先让 `X/Z` 能稳定产生真实机身 yaw，而不是只象征性拧 hipx。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
