@@ -29,6 +29,90 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: wheel-yaw-open-loop-diagnostic-v10
+
+状态：新增 JK03 开环轮子差速 yaw 诊断工具；不修改训练 reward、不修改 PPO、不修改 JK03 参数。
+
+### 为什么修改
+
+连续多版训练后，用户实测仍然出现：
+
+- 按 `Z/X` 只能拧 hipx 关节，机身最多转约 45 度后卡住。
+- 修改 reward 后无法稳定判断是“policy 没学会 yaw”，还是“轮子/摩擦/动作映射本身无法通过差速产生 yaw”。
+
+因此先增加一个不经过 policy 的物理测试：直接给四个轮子施加开环速度动作，左轮和右轮反向转，看机身是否真实产生 yaw 角速度和 yaw 角位移。
+
+### 修改文件
+
+- `robot_lab-main/scripts/tools/check_jk03_wheel_yaw.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增 `check_jk03_wheel_yaw.py`：
+
+- 加载 Isaac Lab / RobotLab 环境，默认任务为 `RobotLab-Isaac-Velocity-Flat-JK03-v0`。
+- 将 `num_envs` 固定为诊断用的 1 个环境。
+- 关闭观测噪声、外力、push、质量/材质随机化，降低开环测试中的随机因素。
+- 如果加载 rough 任务，会关闭 terrain curriculum 并将 terrain 限制到最低等级，避免地形影响轮子差速判断。
+- 每个 phase 先用零 action 稳定一小段时间，再施加固定轮子 action。
+- 默认假设最后 4 个 action 是 `[FL, FR, RL, RR]` 轮子速度动作。
+- 测试两组 yaw：
+  - `yaw_left`: `[+1, -1, +1, -1] * wheel_action`
+  - `yaw_right`: `[-1, +1, -1, +1] * wheel_action`
+- 输出每组测试的：
+  - `yaw_delta`：机身 yaw 角变化，单位 degree。
+  - `mean_wz`：机身平均 yaw 角速度，单位 rad/s。
+  - `mean_vx / mean_vy`：机身平均前后/左右速度。
+  - `PASS / FAIL`：是否超过最小 yaw 角度或 yaw 角速度阈值。
+
+### 如何运行
+
+云服务器上建议先停止当前 play 或训练，再运行，避免两个 Isaac Sim 同时抢 GPU：
+
+```bash
+cd /root/dog-robot-main/robot_lab-main
+
+/root/IsaacLab/isaaclab.sh -p scripts/tools/check_jk03_wheel_yaw.py \
+  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --headless \
+  --num_envs 1 \
+  --wheel_action 1.0 \
+  --duration 4.0
+```
+
+如果 yaw 反应很弱，可以提高轮子动作幅度做诊断：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/tools/check_jk03_wheel_yaw.py \
+  --task=RobotLab-Isaac-Velocity-Flat-JK03-v0 \
+  --headless \
+  --num_envs 1 \
+  --wheel_action 2.0 \
+  --duration 4.0 \
+  --include_forward
+```
+
+### 结果怎么判断
+
+- 如果 `yaw_left` 和 `yaw_right` 都是 `FAIL`，说明开环轮子差速也几乎转不动，这时继续调 PPO/reward 意义很小，要优先检查轮子方向、接触摩擦、轮子驱动力、动作尺度或四个轮子的 action 顺序。
+- 如果 `yaw_left` 和 `yaw_right` 都能转，但方向相同，说明轮子 action 顺序或正负号假设有问题。
+- 如果 `yaw_left` 和 `yaw_right` 能朝相反方向转，说明物理层面可以差速 yaw，后续再回到 command mapping、reward 权重和 PPO 训练上修改。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum 算法。
+- 没有修改 reward 权重。
+- 没有修改 PPO 配置。
+
+### 已知风险
+
+- 脚本默认最后 4 个 action 是轮子速度动作。如果后续动作顺序改变，测试结论会失效。
+- 脚本默认轮子顺序按 `[FL, FR, RL, RR]` 解释；如果实际 action 顺序不同，`yaw_left/yaw_right` 的方向判断需要按输出重新校准。
+- 开环测试不是训练效果评估，只用于判断底层物理和动作映射是否支持轮式差速 yaw。
+
 ## 2026-06-22: mature-wheeled-baseline-v9
 
 状态：本地静态编译通过；目标是停止继续叠加手写 yaw 奖励，回到成熟轮足基线，让 flat 先恢复稳定移动和标准 yaw 速度跟踪。
