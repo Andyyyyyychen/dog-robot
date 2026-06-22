@@ -56,11 +56,11 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.15
         self.rewards.base_height_l2.weight = -1.0
         self.rewards.base_height_l2.params["target_height"] = 0.456
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.8
-        self.rewards.yaw_command_progress.weight = 0
+        self.rewards.track_lin_vel_xy_exp.weight = 4.5
+        self.rewards.track_ang_vel_z_exp.weight = 2.2
+        self.rewards.yaw_command_progress.weight = 1.2
         self.rewards.yaw_command_progress.params["command_threshold"] = 0.06
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.85
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.45
         self.rewards.yaw_wheel_differential_progress.weight = 0
         self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.06
         self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
@@ -213,14 +213,14 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         # no terrain curriculum
         self.curriculum.terrain_levels = None
         self.curriculum.command_levels_lin_vel.params["range_multiplier"] = (0.7, 1.0)
-        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.6, 1.0)
+        self.curriculum.command_levels_ang_vel.params["range_multiplier"] = (0.35, 0.75)
 
         # Keyboard play uses arrows for x/y translation and Z/X for yaw.
         self.commands.base_velocity.heading_command = False
         self.commands.base_velocity.ranges.lin_vel_x = (-0.8, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (-0.45, 0.45)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.6, 0.6)
-        self.commands.base_velocity.ranges.heading = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.heading = (-0.5, 0.5)
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "JK03FlatEnvCfg":
@@ -237,12 +237,13 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         # instead of learning another straight-line shortcut.
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.6, 0.6)
-        self.commands.base_velocity.ranges.heading = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.heading = (-0.5, 0.5)
 
         self.rewards.track_lin_vel_xy_exp.weight = 4.0
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
-        self.rewards.yaw_command_progress.weight = 0
+        self.rewards.track_ang_vel_z_exp.weight = 2.6
+        self.rewards.yaw_command_progress.weight = 2.0
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.45
         self.rewards.yaw_wheel_differential_progress.weight = 0
         self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
         self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names

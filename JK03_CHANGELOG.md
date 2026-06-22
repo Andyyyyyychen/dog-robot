@@ -29,6 +29,73 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: yaw-progress-rebalance-v11
+
+状态：针对 `X/Z` 只能轻微拧 hipx、不能产生真实机身转向的问题，调整 flat / flat-yaw 的 yaw reward 与 yaw curriculum。没有修改 JK03 原始参数、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+云端最新训练 `jk03_flat/2026-06-22_14-24-14` 在约 `step 1005` 时表现为：
+
+- `mean_reward` 上升：`57.35 -> 58.84 -> 61.05`。
+- `error_vel_yaw` 变差：`0.571 -> 0.587 -> 0.599`。
+- `track_ang_vel_z_exp` 下降：`1.240 -> 1.231 -> 1.225`。
+- 用户实际 `play.py --keyboard` 测试时，按 `X/Z` 只会象征性拧 hipx，机身不真正旋转。
+- 开环轮子差速测试已经证明 JK03 物理层面可以 yaw：`yaw_left` 曾测到约 `-23.37 deg`，`mean_wz=-0.3527 rad/s`。
+
+因此问题不是键盘映射，也不是 URDF 完全不能转，而是当前 policy 没有把 yaw command 学成真实 `base_wz`。v9 关闭了手写轮差速奖励后，yaw 只靠标准 `track_ang_vel_z_exp`，信号偏弱；同时 angular curriculum 已经升高，导致策略继续用“站稳/直行/少惩罚”拿总分，牺牲 yaw。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `track_lin_vel_xy_exp.weight: 5.0 -> 4.5`
+  - 降低前后/平移 tracking 对总 reward 的压制，避免 policy 继续只优化直行。
+- `track_ang_vel_z_exp.weight: 1.8 -> 2.2`
+  - 提高标准 yaw tracking 权重。
+- `yaw_command_progress.weight: 0 -> 1.2`
+  - 启用已有的真实 yaw 进展奖励。
+  - 这个 reward 只看 `sign(yaw_command) * base_wz`，不奖励轮子速度差本身。
+  - 目的：只有机身真的按 `X/Z` 命令方向旋转才给正奖励。
+- `yaw_command_progress.max_yaw_rate: 0.85 -> 0.45`
+  - 让早期较小 yaw 角速度也能得到清晰奖励，不要求一开始就达到很大转速。
+- `command_levels_ang_vel.range_multiplier: (0.6, 1.0) -> (0.35, 0.75)`
+  - 放慢早期 yaw curriculum，避免 yaw 难度涨得比能力快。
+- `ang_vel_z range: (-0.6, 0.6) -> (-0.5, 0.5)`
+  - 降低早期训练和键盘 play 的最大 yaw 命令，让 policy 先学会可实现的稳定转向。
+
+`JK03FlatYawEnvCfg`：
+
+- `ang_vel_z range: (-0.6, 0.6) -> (-0.5, 0.5)`。
+- `track_ang_vel_z_exp.weight: 2.0 -> 2.6`。
+- `yaw_command_progress.weight: 0 -> 2.0`。
+- `yaw_command_progress.max_yaw_rate: 0.45`。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 fan-ziqi terrain curriculum 算法。
+- 没有新增抬腿/对角步态复杂 reward。
+- 没有恢复轮速差本身奖励；仍然避免奖励“轮子乱转但身体不转”。
+
+### 预期效果
+
+- `error_vel_yaw` 应该停止继续上升，并在 800-1500 step 后开始下降。
+- `track_ang_vel_z_exp` 和 `yaw_command_progress` 应该上升。
+- `X/Z` 时应该先出现更明显的 `base_wz`，再逐渐减少 hipx 拧腿捷径。
+
+### 风险
+
+- 如果 yaw 权重仍不够，policy 可能继续忽略 yaw。
+- 如果 yaw 权重过强，直行可能轻微变差，需要观察 `error_vel_xy`。
+- 老 checkpoint 不会变好，必须从这版代码重新训练或至少重新启动新 run。
+
 ## 2026-06-22: wheel-yaw-open-loop-diagnostic-v10
 
 状态：新增 JK03 开环轮子差速 yaw 诊断工具；不修改训练 reward、不修改 PPO、不修改 JK03 参数。
