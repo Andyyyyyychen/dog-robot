@@ -29,6 +29,102 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-22: mature-wheeled-baseline-v9
+
+状态：本地静态编译通过；目标是停止继续叠加手写 yaw 奖励，回到成熟轮足基线，让 flat 先恢复稳定移动和标准 yaw 速度跟踪。
+
+### 为什么修改
+
+连续几版为了修复转向，加入了 yaw 专用奖励、轮速差奖励、抬轮/对角踏步奖励和 hipx 约束。实际训练和视频表现说明这些奖励互相抢目标：
+
+- `yaw_wheel_differential_progress` / `yaw_wheel_velocity_alignment` 容易奖励“轮子有速度差”，但不一定奖励“机身真的稳定转过去”。
+- 过强的 `yaw_stuck_with_command`、抬轮相位奖励、脚滑惩罚会让早期策略宁愿不动，或者用拧 hipx 的方式拿局部收益。
+- `feet_slide` 对轮式足端不适合直接照搬普通足式机器人，因为轮子接地滚动时足端相对机身本来就有切向速度，惩罚太大容易压住轮式运动。
+- `track_lin_vel_xy_exp` 和 `track_ang_vel_z_exp` 过大时，会把策略推向快速拿 tracking 奖励的捷径，不一定产生健康姿态。
+
+### 参考基线
+
+对照 RobotLab 中成熟轮足配置：
+
+- `unitree_go2w`
+- `unitree_b2w`
+- `deeprobotics_m20`
+
+这些配置的共同点是：
+
+- 轮子速度动作 scale 通常使用 `5.0`。
+- yaw 主要靠标准 `track_ang_vel_z_exp`，而不是大量手写 yaw 奖励。
+- 轮式足端的 `feet_slide` 通常为 `0`。
+- 腿部姿态主要用 `joint_pos_penalty` 和少量 joint deviation 约束。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+Flat：
+
+- `joint_vel.scale: 8.0 -> 5.0`，降低轮子动作幅度，避免转向时轮速过冲。
+- `track_lin_vel_xy_exp: 9.0 -> 5.0`，降低直行奖励对总 reward 的压制。
+- `track_ang_vel_z_exp: 1.6 -> 1.8`，保留 yaw 跟踪，但不再依赖手写 yaw 轮速奖励。
+- `yaw_command_progress: 0.55 -> 0`。
+- `yaw_wheel_differential_progress: 0.25 -> 0`。
+- `yaw_hipx_twist_without_yaw_progress: -3.0 -> 0`。
+- `joint_deviation_hipx_l1: -0.55 -> -0.80`。
+- `joint_pos_penalty: -0.90 -> -1.00`。
+- `yaw_turn_joint_posture_l2: -0.30 -> -0.45`。
+- `yaw_stuck_with_command: -6.0 -> -2.0`，避免早期因为 yaw 不足被过度惩罚到不敢探索。
+- yaw command range 从 `+-0.9` 收到 `+-0.6`，先学可实现的稳定转向，再扩大范围。
+
+FlatYaw：
+
+- yaw command range 从 `+-0.9` 收到 `+-0.6`。
+- `track_ang_vel_z_exp: 1.8 -> 2.0`。
+- 关闭 `yaw_command_progress` 和 `yaw_wheel_differential_progress`。
+- `joint_deviation_hipx_l1: -0.80 -> -0.90`。
+- `joint_pos_penalty: -1.00 -> -1.10`。
+- `yaw_turn_joint_posture_l2: -0.30 -> -0.55`。
+
+Rough：
+
+- `joint_vel.scale: 8.0 -> 5.0`。
+- `track_lin_vel_xy_exp: 8.0 -> 5.0`。
+- `track_ang_vel_z_exp: 4.0 -> 1.5`。
+- `joint_deviation_hipx_l1: -0.16 -> -0.25`。
+- `joint_pos_penalty: -0.45 -> -0.80`。
+- `feet_slide: -0.16 -> 0`。
+- `feet_gait: 0.22 -> 0`。
+- 楼梯相关奖励整体降温：`stair_upward_progress 3.0 -> 2.0`、`wheel_clearance_on_command 1.6 -> 0.8` 等。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum 算法。
+- 没有修改 PPO 结构。
+
+### 预期效果
+
+这版不再强行教“对角抬腿转向”。目标先回到更成熟的轮足基线：
+
+- 前进/后退/左右平移先稳定。
+- yaw 转向尽量靠标准角速度 tracking 学出来。
+- hipx 拧腿由更普通、更稳定的姿态惩罚压住。
+- rough 训练不再过早被楼梯/抬轮奖励带偏。
+
+### 后续判断
+
+新训练必须重新启动，旧进程不会自动加载这版代码。验证时优先看：
+
+- `error_vel_yaw` 是否下降。
+- `track_ang_vel_z_exp` 是否上升。
+- `joint_deviation_hipx_l1` 是否没有继续变大。
+- `joint_pos_penalty` 是否没有持续恶化。
+- 实际视频里是否还靠 hipx 拧到 45 度后卡住。
+
 ## 2026-06-22: flat-yaw-mature-wheel-baseline-v8
 
 状态：本地静态编译通过；目标是修正 v7 中“轮差速奖励上升，但实际 yaw 仍弱，并且继续拧 hipx 关节”的问题。
