@@ -351,6 +351,34 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_front_wheel_participation = RewTerm(
+        func=mdp.yaw_front_wheel_participation,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "target_front_speed": 0.10,
+            "front_body_names": ("fl_wheel", "fr_wheel"),
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    yaw_rear_drag_without_front_penalty = RewTerm(
+        func=mdp.yaw_rear_drag_without_front_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "speed_margin": 0.04,
+            "target_excess_speed": 0.12,
+            "front_body_names": ("fl_wheel", "fr_wheel"),
+            "rear_body_names": ("hl_wheel", "hr_wheel"),
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
 
 @configclass
 class JK03RoughEnvCfg(LocomotionVelocityRoughEnvCfg):

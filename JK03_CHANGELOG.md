@@ -29,6 +29,144 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: front-wheel-participation-v15
+
+状态：根据“前轮几乎不动、后轮拖着滑动转向”的最新现象，新增直接针对前轮参与和后轮单独拖动的 yaw reward/penalty；同时打开 `Flat-Yaw` 里的抬轮/摆动奖励。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v14 训练数据里 `yaw_turn_feet_clearance` 和 `yaw_turn_tangential_swing` 有上升趋势，但用户实测仍然是：
+
+- 前轮/前脚基本不参与。
+- 后轮拖着地面滑动，让机身产生 yaw。
+- 只靠原来的 `yaw_turn_feet_clearance`、`yaw_turn_tangential_swing`、`yaw_turn_diagonal_step` 仍可能拿到一点奖励，因此 PPO 没有被明确要求“前轮也要动”。
+- `JK03FlatYawEnvCfg` 之前把抬轮相关 reward 全部置零；如果训练 `RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0`，就不会学到抬轮转向。
+
+本次目标不是强制标准 trot，而是先让原地 yaw 时前轮也产生切向参与，打掉“后轮单独拖着转”的捷径。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增 reward 函数：
+
+- `yaw_front_wheel_participation`
+  - 只在接近原地 yaw 时触发：`abs(command yaw) > command_threshold` 且 `sqrt(vx^2 + vy^2) <= max_xy_command`。
+  - 读取 `fl_wheel`、`fr_wheel` 相对机身的速度。
+  - 把前轮速度投影到 yaw 转向的切向方向。
+  - 当前轮沿指令 yaw 方向有足够切向运动时给正奖励。
+  - 目的：前轮贴地当固定支点时拿不到这部分奖励。
+
+- `yaw_rear_drag_without_front_penalty`
+  - 同样只在接近原地 yaw 时触发。
+  - 比较前轮和后轮的 yaw 切向速度。
+  - 如果后轮切向速度明显大于前轮速度超过 `speed_margin`，按比例给 penalty。
+  - 目的：直接惩罚“后轮动很多、前轮几乎不动”的滑拖转向。
+
+普通 `JK03FlatEnvCfg`：
+
+- `joint_pos.scale`
+  - `hipx: 0.06 -> 0.08`
+  - `hipy: 0.17 -> 0.22`
+  - `knee: 0.17 -> 0.22`
+  - 原因：给腿部/轮脚更多动作余量，不然 reward 叫它抬，但 action 空间太保守。
+- `yaw_turn_joint_posture_l2.weight: -0.45 -> -0.25`
+  - 降低 yaw 时 hipx 姿态压制，但不完全取消，防止继续硬拧。
+- `joint_deviation_hipx_l1.weight: -0.80 -> -0.50`
+  - 降低 hipx 惩罚，给转向探索空间。
+- `joint_pos_penalty.weight: -1.00 -> -0.65`
+  - 降低整体腿部姿态惩罚，避免策略继续选择少动腿。
+- `yaw_turn_feet_clearance.weight: 0.25 -> 0.30`
+  - 小幅提高抬轮奖励。
+- `yaw_turn_tangential_swing.weight: 0.12 -> 0.15`
+  - 小幅提高抬起后沿旋转方向摆动的奖励。
+- 新增 `yaw_front_wheel_participation.weight = 0.25`
+  - 普通 Flat 中温和要求前轮参与。
+- 新增 `yaw_rear_drag_without_front_penalty.weight = -0.12`
+  - 普通 Flat 中温和惩罚后轮单独拖动。
+
+专用 `JK03FlatYawEnvCfg`：
+
+- `track_ang_vel_z_exp.weight: 2.6 -> 2.0`
+  - yaw tracking 保持中等，不让“只要 yaw 转起来”压过动作形态。
+- `yaw_command_progress.weight: 2.0 -> 0.6`
+  - 降低纯 yaw 进展奖励，避免继续奖励后轮拖滑捷径。
+- `yaw_wheel_differential_progress.weight: 0 -> 0.10`
+  - 保留一点轮差速可行性，但不作为主导。
+- `yaw_wheel_velocity_alignment.weight: 0 -> 0.05`
+  - 保留很轻的轮速方向提示。
+- `yaw_stuck_with_command.weight: -2.5 -> -2.0`
+  - 避免“不动”惩罚过强导致它为逃避 stuck 而乱滑。
+- `feet_slide.weight: 0 -> -0.12`
+  - `Flat-Yaw` 里重新打开滑动惩罚。
+- `yaw_turn_feet_clearance.weight: 0 -> 0.35`
+  - `Flat-Yaw` 里重新打开抬轮奖励。
+- `yaw_turn_diagonal_step.weight: 0 -> 0.10`
+  - 轻量鼓励对角参与，但不打开硬相位惩罚。
+- `yaw_turn_tangential_swing.weight: 0 -> 0.18`
+  - 重点鼓励抬起后沿旋转切向摆动。
+- `yaw_front_wheel_participation.weight = 0.35`
+  - 专用 yaw 训练里更强要求前轮参与。
+- `yaw_rear_drag_without_front_penalty.weight = -0.15`
+  - 专用 yaw 训练里更强惩罚后轮单独拖动。
+- `joint_deviation_hipx_l1.weight: -0.90 -> -0.35`
+- `joint_pos_penalty.weight: -1.10 -> -0.45`
+- `yaw_turn_joint_posture_l2.weight: -0.55 -> -0.20`
+  - 让专用 yaw 训练真正允许腿部动作出现。
+
+仍然保持关闭：
+
+- `yaw_turn_air_time_deficit.weight = 0`
+- `yaw_turn_phase_timeout.weight = 0`
+
+原因：这两个是硬相位/硬 air-time 约束，之前容易让 PPO 选择不动；这轮先不打开。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有修改 PPO 结构。
+
+### 验证结果
+
+- 本地 `py_compile` 通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 已上传到云服务器 `ssh -p 31979 root@183.147.142.40`。
+- 云端 `py_compile` 通过。
+- 云端 grep 已确认 `yaw_front_wheel_participation` 和 `yaw_rear_drag_without_front_penalty` 存在于最新文件。
+- 注意：上传时云端已有一个训练进程从 `2026-06-23 09:26:47` 开始运行，早于本次 v15 上传；该进程不会自动加载 v15，需要重新启动训练或 resume 才会生效。
+
+### 预期效果
+
+- 原地 yaw 时，前轮固定不动会损失 `yaw_front_wheel_participation` 奖励。
+- 后轮单独拖着转会触发 `yaw_rear_drag_without_front_penalty`。
+- `Flat-Yaw` 训练终于会实际包含抬轮、切向摆动和滑动惩罚。
+
+### 已知风险
+
+- 如果 `yaw_rear_drag_without_front_penalty` 过强，可能重新出现不愿转或 yaw 速度下降。
+- 如果关节惩罚降得过低，可能出现 hipx 扭动变大；需要观察 `joint_deviation_hipx_l1` 和 `yaw_turn_joint_posture_l2`。
+- 如果前轮参与奖励只学成前轮贴地切向滑动，而不是离地摆动，下一轮需要让 `yaw_front_wheel_participation` 与 contact/air-time 或 clearance 进一步绑定。
+
+### 后续观察指标
+
+- `yaw_front_wheel_participation` 是否稳定上升。
+- `yaw_rear_drag_without_front_penalty` 是否下降，或至少不持续升高。
+- `yaw_turn_feet_clearance` 是否继续上升到肉眼可见抬轮。
+- `yaw_turn_tangential_swing` 是否继续上升。
+- `feet_slide` 是否下降或不继续恶化。
+- `joint_deviation_hipx_l1` 是否因为放松惩罚而明显恶化。
+- `error_yaw` 和 `yaw_command_progress` 是否维持改善。
+
 ## 2026-06-23: mid-yaw-lift-shaping-v14
 
 状态：根据 v13 训练到约 3000+ step 后的趋势，把普通 `Flat-JK03-v0` 从“很轻的抬轮提示”推进到“中等抬轮/切向摆动引导”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。

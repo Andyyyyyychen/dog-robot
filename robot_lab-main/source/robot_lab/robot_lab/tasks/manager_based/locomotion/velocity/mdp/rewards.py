@@ -955,6 +955,92 @@ def yaw_turn_tangential_swing(
     return reward
 
 
+def _body_frame_relative_states(
+    env: ManagerBasedRLEnv,
+    asset: Articulation,
+    body_ids: list[int],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return selected body positions and velocities relative to the base frame."""
+    body_pos_translated = asset.data.body_pos_w[:, body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    body_vel_translated = asset.data.body_lin_vel_w[:, body_ids, :] - asset.data.root_lin_vel_w[:, :].unsqueeze(1)
+    body_pos_b = torch.zeros(env.num_envs, len(body_ids), 3, device=env.device)
+    body_vel_b = torch.zeros_like(body_pos_b)
+    for i in range(len(body_ids)):
+        body_pos_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, body_pos_translated[:, i, :])
+        body_vel_b[:, i, :] = math_utils.quat_apply_inverse(asset.data.root_quat_w, body_vel_translated[:, i, :])
+    return body_pos_b, body_vel_b
+
+
+def _yaw_tangential_body_speed(
+    body_pos_b: torch.Tensor,
+    body_vel_b: torch.Tensor,
+    yaw_command: torch.Tensor,
+) -> torch.Tensor:
+    """Measure per-body tangential speed in the commanded yaw direction."""
+    tangent = torch.stack((-body_pos_b[:, :, 1], body_pos_b[:, :, 0]), dim=2)
+    tangent_dir = tangent / torch.clamp(torch.linalg.norm(tangent, dim=2, keepdim=True), min=1.0e-6)
+    signed_tangent_speed = torch.sum(body_vel_b[:, :, :2] * tangent_dir, dim=2)
+    return signed_tangent_speed * torch.sign(yaw_command).unsqueeze(1)
+
+
+def yaw_front_wheel_participation(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    target_front_speed: float,
+    front_body_names: tuple[str, str],
+) -> torch.Tensor:
+    """Reward front wheels moving tangentially with the commanded in-place yaw turn."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command = command[:, 2]
+    active_command = torch.logical_and(torch.abs(yaw_command) > command_threshold, command_xy_norm <= max_xy_command)
+
+    front_body_ids = list(asset.find_bodies(front_body_names)[0])
+    front_pos_b, front_vel_b = _body_frame_relative_states(env, asset, front_body_ids)
+    front_tangent_speed = torch.clamp(_yaw_tangential_body_speed(front_pos_b, front_vel_b, yaw_command), min=0.0)
+    front_speed_score = torch.mean(front_tangent_speed, dim=1) / max(target_front_speed, 1.0e-6)
+    reward = torch.clamp(front_speed_score, min=0.0, max=1.0)
+    reward *= active_command.float()
+    reward *= _upright_scale(env)
+    return reward
+
+
+def yaw_rear_drag_without_front_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    speed_margin: float,
+    target_excess_speed: float,
+    front_body_names: tuple[str, str],
+    rear_body_names: tuple[str, str],
+) -> torch.Tensor:
+    """Penalize yaw turns where rear wheels move much more than the front wheels."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command = command[:, 2]
+    active_command = torch.logical_and(torch.abs(yaw_command) > command_threshold, command_xy_norm <= max_xy_command)
+
+    front_body_ids = list(asset.find_bodies(front_body_names)[0])
+    rear_body_ids = list(asset.find_bodies(rear_body_names)[0])
+    front_pos_b, front_vel_b = _body_frame_relative_states(env, asset, front_body_ids)
+    rear_pos_b, rear_vel_b = _body_frame_relative_states(env, asset, rear_body_ids)
+    front_speed = torch.mean(torch.clamp(_yaw_tangential_body_speed(front_pos_b, front_vel_b, yaw_command), min=0.0), dim=1)
+    rear_speed = torch.mean(torch.clamp(_yaw_tangential_body_speed(rear_pos_b, rear_vel_b, yaw_command), min=0.0), dim=1)
+
+    rear_only_excess = torch.relu(rear_speed - front_speed - speed_margin)
+    penalty = torch.clamp(rear_only_excess / max(target_excess_speed, 1.0e-6), min=0.0, max=1.0)
+    penalty *= active_command.float()
+    penalty *= _upright_scale(env)
+    return penalty
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 
