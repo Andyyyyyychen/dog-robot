@@ -1009,6 +1009,45 @@ def yaw_front_wheel_participation(
     return reward
 
 
+def yaw_front_lift_tangential_participation(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    min_height: float,
+    target_height: float,
+    min_air_time: float,
+    max_air_time: float,
+    target_tangential_speed: float,
+    front_body_names: tuple[str, str],
+) -> torch.Tensor:
+    """Reward front wheels that lift and swing tangentially during in-place yaw turns."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command = command[:, 2]
+    active_command = torch.logical_and(torch.abs(yaw_command) > command_threshold, command_xy_norm <= max_xy_command)
+
+    front_asset_ids = list(asset.find_bodies(front_body_names)[0])
+    front_sensor_ids = list(contact_sensor.find_bodies(front_body_names)[0])
+    front_pos_b, front_vel_b = _body_frame_relative_states(env, asset, front_asset_ids)
+
+    height_span = max(target_height - min_height, 1.0e-6)
+    clearance_score = torch.clamp((front_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
+    air_time = contact_sensor.data.current_air_time[:, front_sensor_ids]
+    air_score = _bounded_phase_score(air_time, min_air_time, max_air_time)
+    tangent_speed = torch.clamp(_yaw_tangential_body_speed(front_pos_b, front_vel_b, yaw_command), min=0.0)
+    tangent_score = torch.clamp(tangent_speed / max(target_tangential_speed, 1.0e-6), min=0.0, max=1.0)
+
+    reward = torch.mean(clearance_score * air_score * tangent_score, dim=1)
+    reward *= active_command.float()
+    reward *= _upright_scale(env)
+    return reward
+
+
 def yaw_rear_drag_without_front_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -1036,6 +1075,45 @@ def yaw_rear_drag_without_front_penalty(
 
     rear_only_excess = torch.relu(rear_speed - front_speed - speed_margin)
     penalty = torch.clamp(rear_only_excess / max(target_excess_speed, 1.0e-6), min=0.0, max=1.0)
+    penalty *= active_command.float()
+    penalty *= _upright_scale(env)
+    return penalty
+
+
+def yaw_wheel_lateral_separation_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    min_front_separation: float,
+    min_rear_separation: float,
+    max_abs_lateral: float,
+    front_body_names: tuple[str, str],
+    rear_body_names: tuple[str, str],
+) -> torch.Tensor:
+    """Penalize left/right wheels crossing, stacking, or splaying too far during yaw turns."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command_abs = torch.abs(command[:, 2])
+    active_command = torch.logical_and(yaw_command_abs > command_threshold, command_xy_norm <= max_xy_command)
+
+    front_body_ids = list(asset.find_bodies(front_body_names)[0])
+    rear_body_ids = list(asset.find_bodies(rear_body_names)[0])
+    front_pos_b, _ = _body_frame_relative_states(env, asset, front_body_ids)
+    rear_pos_b, _ = _body_frame_relative_states(env, asset, rear_body_ids)
+
+    front_separation = front_pos_b[:, 0, 1] - front_pos_b[:, 1, 1]
+    rear_separation = rear_pos_b[:, 0, 1] - rear_pos_b[:, 1, 1]
+    front_stack = torch.relu(min_front_separation - front_separation) / max(min_front_separation, 1.0e-6)
+    rear_stack = torch.relu(min_rear_separation - rear_separation) / max(min_rear_separation, 1.0e-6)
+
+    front_splay = torch.mean(torch.relu(torch.abs(front_pos_b[:, :, 1]) - max_abs_lateral), dim=1)
+    rear_splay = torch.mean(torch.relu(torch.abs(rear_pos_b[:, :, 1]) - max_abs_lateral), dim=1)
+    splay = (front_splay + rear_splay) / max(max_abs_lateral, 1.0e-6)
+
+    penalty = torch.square(front_stack) + 0.5 * torch.square(rear_stack) + torch.square(splay)
     penalty *= active_command.float()
     penalty *= _upright_scale(env)
     return penalty

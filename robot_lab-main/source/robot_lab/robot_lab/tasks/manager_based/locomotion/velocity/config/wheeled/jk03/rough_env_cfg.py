@@ -364,6 +364,24 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_front_lift_tangential_participation = RewTerm(
+        func=mdp.yaw_front_lift_tangential_participation,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "min_height": -0.35,
+            "target_height": -0.235,
+            "min_air_time": 0.015,
+            "max_air_time": 0.35,
+            "target_tangential_speed": 0.10,
+            "front_body_names": ("fl_wheel", "fr_wheel"),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
     yaw_rear_drag_without_front_penalty = RewTerm(
         func=mdp.yaw_rear_drag_without_front_penalty,
         weight=0.0,
@@ -373,6 +391,22 @@ class JK03RewardsCfg(RewardsCfg):
             "max_xy_command": 0.12,
             "speed_margin": 0.04,
             "target_excess_speed": 0.12,
+            "front_body_names": ("fl_wheel", "fr_wheel"),
+            "rear_body_names": ("hl_wheel", "hr_wheel"),
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    yaw_wheel_lateral_separation_penalty = RewTerm(
+        func=mdp.yaw_wheel_lateral_separation_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "min_front_separation": 0.42,
+            "min_rear_separation": 0.38,
+            "max_abs_lateral": 0.40,
             "front_body_names": ("fl_wheel", "fr_wheel"),
             "rear_body_names": ("hl_wheel", "hr_wheel"),
             "asset_cfg": SceneEntityCfg("robot"),

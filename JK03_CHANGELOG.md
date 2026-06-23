@@ -29,6 +29,120 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: lift-turn-and-wheel-separation-v16
+
+状态：根据 v15 实测反馈“前腿会动，但趴开/交叉，左右轮叠在一起导致左转和右转卡住”，把目标从“前轮有切向参与”进一步收紧为“前轮离地后沿 yaw 切向摆动，同时左右轮保持合理间距”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v15 的 `yaw_front_wheel_participation` 只检查前轮相对机身是否有 yaw 切向速度。实测证明这个条件太宽：
+
+- 前轮贴地轻微滑动也可以拿到奖励。
+- 前腿横向趴开也可能产生切向速度。
+- 左右轮靠得太近甚至叠在一起时，旧 reward 没有直接惩罚。
+- 结果是左转/右转时轮子卡住，不能形成稳定抬腿转向。
+
+本次目标：先让左右 yaw 转向时“抬前轮/前脚并摆动”，同时禁止前后左右轮横向交叉、叠轮或过度外趴。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增 reward 函数：
+
+- `yaw_front_lift_tangential_participation`
+  - 只在接近原地 yaw 时触发：`abs(yaw command) > command_threshold` 且 `sqrt(vx^2 + vy^2) <= max_xy_command`。
+  - 读取 `fl_wheel`、`fr_wheel` 的机身坐标位置和速度。
+  - 同时要求三件事：
+    - 前轮高度高于 `min_height`，接近 `target_height`。
+    - 前轮有足够 `air_time`。
+    - 前轮沿指令 yaw 方向有切向速度。
+  - 三项相乘后取前轮平均，所以贴地小滑动不能再轻松拿主奖励。
+
+- `yaw_wheel_lateral_separation_penalty`
+  - 只在接近原地 yaw 时触发。
+  - 计算机身坐标下左右轮的横向间距：
+    - `fl_wheel.y - fr_wheel.y`
+    - `hl_wheel.y - hr_wheel.y`
+  - 如果前轮间距低于 `min_front_separation`，说明左右前轮靠近/交叉/叠轮，惩罚。
+  - 如果后轮间距低于 `min_rear_separation`，轻度惩罚。
+  - 如果任意轮横向绝对位置超过 `max_abs_lateral`，说明腿向外趴开太多，也惩罚。
+
+普通 `JK03FlatEnvCfg`：
+
+- `yaw_turn_feet_clearance.weight: 0.30 -> 0.38`
+  - 增强 yaw 时抬轮信号。
+- `yaw_turn_tangential_swing.weight: 0.15 -> 0.22`
+  - 增强抬起后沿旋转方向摆动的信号。
+- `yaw_front_wheel_participation.weight: 0.25 -> 0.05`
+  - 旧前轮参与 reward 降为辅助，避免贴地滑动继续骗主奖励。
+- 新增 `yaw_front_lift_tangential_participation.weight = 0.35`
+  - 主推“前轮离地 + 切向摆动”。
+  - `min_air_time = 0.012`
+  - `max_air_time = 0.40`
+  - `target_tangential_speed = 0.10`
+- `yaw_rear_drag_without_front_penalty.weight: -0.12 -> -0.16`
+  - 略微加强后轮单独拖动惩罚。
+- 新增 `yaw_wheel_lateral_separation_penalty.weight = -0.25`
+  - 防止左右轮叠在一起或腿过度趴开。
+  - `min_front_separation = 0.42`
+  - `min_rear_separation = 0.38`
+  - `max_abs_lateral = 0.40`
+
+专用 `JK03FlatYawEnvCfg`：
+
+- `yaw_turn_feet_clearance.weight: 0.35 -> 0.45`
+- `yaw_turn_tangential_swing.weight: 0.18 -> 0.28`
+- `yaw_front_wheel_participation.weight: 0.35 -> 0.08`
+- `yaw_front_lift_tangential_participation.weight = 0.50`
+- `yaw_rear_drag_without_front_penalty.weight: -0.15 -> -0.20`
+- `yaw_wheel_lateral_separation_penalty.weight = -0.35`
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有修改 PPO 结构。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`，避免重新把策略压成不动。
+
+### 验证结果
+
+- 本地 `py_compile` 通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地 `git diff --check` 通过。
+
+### 预期效果
+
+- 左右 yaw 转向时，前轮贴地蹭动不再是主要收益。
+- 前轮需要离地并沿切向摆动，才会拿到主要新增奖励。
+- 左右轮靠近、交叉、叠轮会被直接惩罚。
+- 腿向外趴开太多也会被惩罚。
+
+### 已知风险
+
+- 如果 `yaw_wheel_lateral_separation_penalty` 太强，可能短期降低 yaw 动作探索。
+- 如果 `yaw_front_lift_tangential_participation` 太强，可能出现前轮抬起但 yaw 速度下降，需要观察 `track_ang_vel_z_exp` 和 `yaw_command_progress`。
+- 如果仍然不抬腿，下一步应考虑专门训练 `Flat-Yaw`，并加入更明确的相位/接触节奏，而不是继续在普通 Flat 的混合 command 中稀释 yaw 样本。
+
+### 后续观察指标
+
+- `yaw_front_lift_tangential_participation` 是否从 0 附近稳定上升。
+- `yaw_wheel_lateral_separation_penalty` 是否下降或不持续变负。
+- `yaw_turn_feet_clearance` 是否明显高于 v15。
+- `yaw_turn_tangential_swing` 是否明显高于 v15。
+- `yaw_rear_drag_without_front_penalty` 是否下降。
+- `feet_slide` 是否继续稳定。
+- `error_yaw`、`yaw_command_progress` 是否没有明显崩。
+
 ## 2026-06-23: front-wheel-participation-v15
 
 状态：根据“前轮几乎不动、后轮拖着滑动转向”的最新现象，新增直接针对前轮参与和后轮单独拖动的 yaw reward/penalty；同时打开 `Flat-Yaw` 里的抬轮/摆动奖励。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
