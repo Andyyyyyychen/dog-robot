@@ -29,6 +29,67 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: mid-yaw-lift-shaping-v14
+
+状态：根据 v13 训练到约 3000+ step 后的趋势，把普通 `Flat-JK03-v0` 从“很轻的抬轮提示”推进到“中等抬轮/切向摆动引导”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v13 数据显示：
+
+- `yaw_command_progress` 和 `track_ang_vel_z_exp` 有一定改善，说明 yaw 目标不是完全无效。
+- 但 `yaw_turn_feet_clearance`、`yaw_turn_diagonal_step`、`yaw_turn_tangential_swing` 长期处在很小量级，并且后期下降。
+- 肉眼测试反馈仍然不能明显抬轮，策略更倾向用轮滑、轻微拧腿或低成本 yaw tracking。
+
+因此本次不再继续只观察 v13，而是进入中间阶段：加大“抬起来并沿转向方向摆”的正奖励，只小幅加大滑动惩罚，仍然不打开强制相位惩罚，避免重新把策略压成不动。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `feet_slide.weight: -0.05 -> -0.08`
+  - 小幅提高拖滑惩罚，让它不要继续只靠轮/脚贴地横向蹭。
+  - 没有提高到 `-0.2` 或更大，避免轮腿狗在 yaw 时因接触滑移被罚到选择不动。
+- `yaw_turn_feet_clearance.weight: 0.10 -> 0.25`
+  - 明显提高 yaw 时轮/脚离地奖励，让“抬起来”变成策略更容易看见的收益。
+- `yaw_turn_diagonal_step.weight: 0.05 -> 0.08`
+  - 只轻微加强对角参与，不强制完整 FL+HR / FR+HL trot 节奏。
+- `yaw_turn_tangential_swing.weight: 0.05 -> 0.12`
+  - 提高抬起后沿 yaw 切向摆动的奖励，避免只抬一下但不参与转向。
+- `yaw_turn_air_time_deficit.weight = 0`
+  - 继续关闭，不惩罚“抬得不够标准”。
+- `yaw_turn_phase_timeout.weight = 0`
+  - 继续关闭，不强迫固定相位切换。
+
+### 没有修改什么
+
+- 没有修改 `jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 PPO 结构。
+- 没有新增新的 reward 函数。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+
+### 预期效果
+
+- 相比 v13，更容易看到肉眼可见的抬轮/摆轮动作。
+- yaw 仍可能先以轮差速为主，但不应继续完全忽略抬轮信号。
+- `feet_slide` 可能略变重，但不应该导致 episode length 明显下降或策略不动。
+
+### 后续观察指标
+
+- `yaw_turn_feet_clearance` 是否比 v13 提高一个明显量级。
+- `yaw_turn_tangential_swing` 是否随训练稳定上升。
+- `yaw_turn_diagonal_step` 是否小幅上升但不导致动作抽搐。
+- `feet_slide` 是否变得过大。
+- `error_yaw`、`yaw_command_progress` 是否继续改善。
+- 如果仍然完全不抬轮，再考虑小权重打开 `yaw_turn_air_time_deficit = -0.02`，不要一步开大。
+
 ## 2026-06-22: soft-yaw-lift-shaping-v13
 
 状态：根据“第一轮修改建议”，把普通 `Flat-JK03-v0` 从强制 yaw/轮差速版本改成更温和的阶段 2 版本：中等 yaw tracking、轻微滑动惩罚、轻微抬轮/对角摆动奖励，不强制完整 FL+HR / FR+HL 对角交替节拍。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
