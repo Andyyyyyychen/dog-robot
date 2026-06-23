@@ -29,6 +29,87 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: flat-yaw-lift-pretrain-v19
+
+状态：在 v18 普通 Flat 继续训练的基础上，新增一版更适合并行实验的专用 `Flat-Yaw` 配置。只修改 `JK03FlatYawEnvCfg` 的命令范围和 reward 权重，不影响普通 `JK03FlatEnvCfg` 当前训练。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+用户准备在同一台 4090 云服务器上并行跑第二个训练，用来专门验证“原地 yaw 抬腿转向”。普通 Flat 同时包含前进、后退、横移、yaw，抬腿信号容易被基础移动目标稀释；而 `Flat-Yaw` 应该更集中地让策略学习：
+
+- 低速原地 yaw。
+- 前轮离地。
+- 离地后沿 yaw 切向摆动。
+- 减少靠轮子差速滑转的捷径。
+
+本次目标：保留 v18 的强抬腿奖励，但把 `Flat-Yaw` 改成更像一个“yaw 抬腿预训练任务”。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+只修改 `JK03FlatYawEnvCfg`：
+
+- `ang_vel_z: (-0.5, 0.5) -> (-0.35, 0.35)`
+  - 降低原地转向命令速度，避免一开始为了追 yaw 直接滑轮/拖轮。
+- `heading: (-0.5, 0.5) -> (-0.35, 0.35)`
+  - 与 yaw 命令范围同步。
+- `track_lin_vel_xy_exp.weight: 4.0 -> 2.0`
+  - 减少 “vx/vy 必须极稳为 0” 对抬腿探索的压制。
+- `track_ang_vel_z_exp.weight: 2.0 -> 2.5`
+  - 保持 yaw 速度跟踪仍然重要。
+- `yaw_command_progress.weight: 0.6 -> 0.8`
+  - 鼓励真正产生 yaw 进展，而不是只抖腿拿抬腿分。
+- `yaw_command_progress.max_yaw_rate: 0.45 -> 0.35`
+  - 与更慢的 yaw 命令范围同步。
+- `yaw_wheel_differential_progress.weight: 0.10 -> 0.03`
+  - 降低“靠左右轮差速滑转”的捷径。
+- `yaw_wheel_velocity_alignment.weight: 0.05 -> 0.02`
+  - 降低轮子差速对齐奖励，避免继续优先学滑地转。
+- `feet_slide.weight: -0.16 -> -0.18`
+  - 稍微加大滑动惩罚，但仍不拉到很大，避免不动。
+- `yaw_turn_feet_clearance.weight: 0.70 -> 0.90`
+  - 更强地奖励 yaw 时抬轮。
+- `yaw_turn_diagonal_step.weight: 0.10 -> 0.06`
+  - 降低硬对角节奏倾向，避免重新逼成奇怪 trot。
+- `yaw_turn_tangential_swing.weight: 0.45 -> 0.65`
+  - 更强地奖励抬起后沿转向方向摆。
+- `yaw_front_wheel_participation.weight: 0.08 -> 0.04`
+  - 旧的“前轮参与”继续降权，避免贴地小滑动骗奖励。
+- `yaw_front_lift_tangential_participation.weight: 1.00 -> 1.40`
+  - 把前轮离地 + 切向摆动设为 Flat-Yaw 的核心主奖励。
+- `yaw_rear_drag_without_front_penalty.weight: -0.22 -> -0.26`
+  - 进一步压低后轮拖着转、前轮不参与的收益。
+
+### 没有修改什么
+
+- 没有修改普通 `JK03FlatEnvCfg` 的 v18 配置。
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有新增 reward 函数。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+
+### 使用建议
+
+- 当前普通 Flat v18 可以继续跑。
+- 另开一个 `RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0`，建议 `--num_envs 256`，专门观察抬腿 yaw。
+- 如果 Flat-Yaw 的 `yaw_front_lift_tangential_participation` 到 `600-800 step` 仍低于 `0.001`，说明 reward 仍然太难拿，下一步需要考虑把抬腿目标拆成更简单的阶段奖励。
+
+### 下一步观察指标
+
+- `yaw_front_lift_tangential_participation`
+- `yaw_turn_feet_clearance`
+- `yaw_turn_tangential_swing`
+- `yaw_command_progress`
+- `track_ang_vel_z_exp`
+- `feet_slide`
+- `yaw_rear_drag_without_front_penalty`
+
 ## 2026-06-23: stronger-lift-with-moderate-slide-penalty-v18
 
 状态：根据 v17 前后反馈“仍然没有形成抬腿，主要还在滑动”，本次不再新增复杂函数，而是直接调整 Flat/Flat-Yaw 的 reward 权重：明显增强前轮抬起和切向摆动正奖励，适度加大脚滑/后轮拖动惩罚，并放宽抬腿奖励的触发门槛，让 policy 更早拿到“抬起来”的正反馈。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
