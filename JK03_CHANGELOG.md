@@ -29,6 +29,89 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: unlock-front-yaw-turn-v17
+
+状态：根据 v16 实测反馈“越限制不能趴开，前轮越锁死在一个姿势，两个前脚不愿意动”，将 yaw 转向策略从“限制前轮横向姿态”改为“只防真正交叉/叠轮，同时放松前腿关节动作空间”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v16 的 `yaw_wheel_lateral_separation_penalty` 同时惩罚左右轮靠太近和轮子横向外趴。实测说明这会产生一个局部最优：
+
+- 前轮只要保持安全间距、不外趴，就能避免扣分。
+- 前腿一动就可能触发横向距离或姿态惩罚。
+- PPO 因此倾向于把前轮锁在固定姿态，让后轮继续拖动或滑动。
+
+本次目标：不要再用强横向姿态约束压住前腿；只在左右轮真的接近交叉/叠轮时轻罚，同时提高“前轮离地 + 切向摆动”的收益。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `yaw_turn_joint_posture_l2.weight: -0.25 -> -0.08`
+  - yaw 转向时大幅降低 hipx 姿态约束，避免前腿为了不扣分直接锁死。
+- `joint_deviation_hipx_l1.weight: -0.50 -> -0.30`
+  - 放松 hipx 偏离惩罚，让前腿可以参与转向。
+- `joint_pos_penalty.weight: -0.65 -> -0.45`
+  - 放松整体关节位置惩罚，减少“少动最安全”的局部最优。
+- `yaw_front_lift_tangential_participation.weight: 0.35 -> 0.45`
+  - 增强“前轮离地并沿 yaw 切向摆动”的主奖励。
+- `yaw_rear_drag_without_front_penalty.weight: -0.16 -> -0.14`
+  - 略微放松后轮拖动惩罚，避免惩罚过强导致不动。
+- `yaw_wheel_lateral_separation_penalty.weight: -0.25 -> -0.06`
+  - 将横向间距惩罚降为安全底线，不再作为主要 shaping。
+- `min_front_separation: 0.42 -> 0.30`
+  - 只在前轮真的靠得很近/接近叠轮时才惩罚。
+- `min_rear_separation: 0.38 -> 0.30`
+  - 后轮同样只保留防交叉底线。
+- `max_abs_lateral: 0.40 -> 0.70`
+  - 基本取消“不能趴开”的硬限制，避免锁死前腿。
+
+专用 `JK03FlatYawEnvCfg`：
+
+- `yaw_front_lift_tangential_participation.weight: 0.50 -> 0.60`
+  - 专用 yaw 任务更强调前轮离地切向摆动。
+- `yaw_rear_drag_without_front_penalty.weight: -0.20 -> -0.14`
+  - 降低后轮拖动惩罚，避免直接压成不动。
+- `yaw_wheel_lateral_separation_penalty.weight: -0.35 -> -0.08`
+  - 只保留防叠轮底线。
+- `joint_deviation_hipx_l1.weight: -0.35 -> -0.25`
+- `joint_pos_penalty.weight: -0.45 -> -0.30`
+- `yaw_turn_joint_posture_l2.weight: -0.20 -> -0.05`
+  - 三项共同放松 yaw 转向时的前腿/hipx 动作限制。
+
+`JK03RoughEnvCfg` 默认参数：
+
+- `yaw_wheel_lateral_separation_penalty` 的默认 `min_front_separation/min_rear_separation/max_abs_lateral` 同步改为 `0.30/0.30/0.70`。
+- 该项在 rough 中默认权重仍为 `0.0`，不会改变 rough 训练，只有以后显式打开才使用更宽松参数。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有新增 reward 函数，避免继续堆复杂逻辑。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+
+### 已知风险
+
+- 因为取消了“不能趴开”的硬限制，前期可能会重新出现轻微外摆。
+- 现在重点是先解除前轮锁死，让前轮愿意动；如果后续出现严重交叉，再只针对交叉阈值微调，而不是重新惩罚正常外摆。
+
+### 下一步观察指标
+
+- `yaw_front_lift_tangential_participation` 是否明显上升。
+- `yaw_turn_tangential_swing` 是否上升。
+- `yaw_wheel_lateral_separation_penalty` 是否保持接近 0，只在异常叠轮时出现。
+- `yaw_rear_drag_without_front_penalty` 是否下降。
+- 视频里前轮是否从“锁死一姿势”变成“能抬起/摆动参与 yaw”。
+
 ## 2026-06-23: lift-turn-and-wheel-separation-v16
 
 状态：根据 v15 实测反馈“前腿会动，但趴开/交叉，左右轮叠在一起导致左转和右转卡住”，把目标从“前轮有切向参与”进一步收紧为“前轮离地后沿 yaw 切向摆动，同时左右轮保持合理间距”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
