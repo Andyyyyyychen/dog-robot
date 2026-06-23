@@ -29,6 +29,87 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-23: stronger-lift-with-moderate-slide-penalty-v18
+
+状态：根据 v17 前后反馈“仍然没有形成抬腿，主要还在滑动”，本次不再新增复杂函数，而是直接调整 Flat/Flat-Yaw 的 reward 权重：明显增强前轮抬起和切向摆动正奖励，适度加大脚滑/后轮拖动惩罚，并放宽抬腿奖励的触发门槛，让 policy 更早拿到“抬起来”的正反馈。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+历史数据里 `yaw_front_lift_tangential_participation` 长期只有 `0.0000x` 量级，说明前轮离地切向摆动几乎没有形成。单纯加大 `feet_slide` 会让机器人更容易选择“不动/锁腿”，所以本次采用组合调整：
+
+- 抬腿/切向摆动正奖励明显增强。
+- 抬腿奖励门槛稍微放宽，让早期小幅抬轮也能拿到信号。
+- 脚滑和后轮单独拖动惩罚适度加大，但不拉到过强。
+- 继续保持横向叠轮惩罚很低，避免重新锁死前轮。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `feet_slide.weight: -0.08 -> -0.12`
+  - 适度提高滑动惩罚，减少继续靠拖滑拿 yaw 的收益。
+- `yaw_turn_feet_clearance.weight: 0.38 -> 0.55`
+  - 明显增强 yaw 转向时抬轮高度奖励。
+- `yaw_turn_feet_clearance.target_height: -0.235 -> -0.255`
+  - 降低抬轮高度目标，让早期小幅抬起也能获得 clearance 奖励。
+- `yaw_turn_feet_clearance.min_air_time: 0.010 -> 0.008`
+  - 降低最小离地时间门槛，让抬轮信号不再过稀疏。
+- `yaw_turn_tangential_swing.weight: 0.22 -> 0.35`
+  - 增强抬起来后沿转向切向摆动的奖励。
+- `yaw_turn_tangential_swing.target_height: -0.235 -> -0.255`
+  - 目标高度稍微降低，让早期小幅抬轮也能开始拿分。
+- `yaw_turn_tangential_swing.min_air_time: 0.010 -> 0.008`
+  - 降低最小离地时间门槛，避免奖励过稀疏。
+- `yaw_front_lift_tangential_participation.weight: 0.45 -> 0.75`
+  - 大幅提高“前轮离地 + yaw 切向摆动”的主奖励。
+- `yaw_front_lift_tangential_participation.target_height: -0.235 -> -0.255`
+  - 让轻微抬起也能拿到前轮抬起奖励。
+- `yaw_front_lift_tangential_participation.min_air_time: 0.012 -> 0.008`
+  - 降低离地时间门槛。
+- `yaw_front_lift_tangential_participation.target_tangential_speed: 0.10 -> 0.08`
+  - 降低切向摆动速度目标，鼓励先学会小幅摆动。
+- `yaw_rear_drag_without_front_penalty.weight: -0.14 -> -0.18`
+  - 适度加强“后轮拖、前轮不参与”的惩罚。
+
+专用 `JK03FlatYawEnvCfg`：
+
+- `feet_slide.weight: -0.12 -> -0.16`
+- `yaw_turn_feet_clearance.weight: 0.45 -> 0.70`
+- `yaw_turn_tangential_swing.weight: 0.28 -> 0.45`
+- `yaw_front_lift_tangential_participation.weight: 0.60 -> 1.00`
+- `yaw_rear_drag_without_front_penalty.weight: -0.14 -> -0.22`
+
+Flat-Yaw 是专门 yaw 训练任务，所以抬腿和防后轮拖动给得更强；但 `yaw_wheel_lateral_separation_penalty` 仍保持 v17 的低权重，不重新限制正常外摆。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有新增 reward 函数。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+- 没有把 `feet_slide` 拉到极大负值，避免再次把策略压成不动。
+
+### 已知风险
+
+- 抬腿奖励增强后，早期可能出现抬轮抽动或不稳定摆腿。
+- 如果脚滑仍然很大，下一步应先看 `yaw_front_lift_tangential_participation` 是否上升；只有它明显上升后，才适合继续加大 `feet_slide`。
+
+### 下一步观察指标
+
+- `yaw_front_lift_tangential_participation` 是否从 `0.0000x` 上升到至少 `0.001` 量级。
+- `yaw_turn_feet_clearance` 是否明显上升。
+- `yaw_turn_tangential_swing` 是否明显上升。
+- `feet_slide` 是否下降或至少不继续恶化。
+- `yaw_rear_drag_without_front_penalty` 是否变得不那么负。
+- 视频里前轮是否从固定姿态变为小幅离地/摆动。
+
 ## 2026-06-23: unlock-front-yaw-turn-v17
 
 状态：根据 v16 实测反馈“越限制不能趴开，前轮越锁死在一个姿势，两个前脚不愿意动”，将 yaw 转向策略从“限制前轮横向姿态”改为“只防真正交叉/叠轮，同时放松前腿关节动作空间”。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
