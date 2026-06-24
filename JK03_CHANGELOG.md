@@ -29,6 +29,91 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: flat-yaw-less-pivot-more-step-v29
+
+状态：针对用户测试反馈“拧关节明显好很多，但前轮仍贴地当支点、后轮贴地滑动完成转向”，本轮只做 Flat-Yaw 参数调节，不新增 reward 函数，不恢复 v28 删除的实验函数。目标是减少轮差速贴地转向捷径，提高已有成熟项 `feet_air_time`、`feet_gait`、`feet_slide` 的相对作用。
+
+### 为什么修改
+
+当前现象：
+
+- 前轮一直在地面上，像两个固定支点。
+- 后轮也没有明显抬起，主要靠贴地滑动帮助 yaw。
+- hipx 拧关节比之前明显缓解，说明无需继续加“防拧关节”新函数。
+
+原因判断：
+
+- v27/v28 为了解决 `X/Z` 无响应，保留了较强的 `track_ang_vel_z_exp`、`yaw_command_progress` 和轮差速辅助。
+- 这些项能让 policy 很快拿到 yaw 奖励，但不要求离地，所以它会优先学“前轮贴地当轴 + 后轮滑动”。
+- `feet_air_time=0.30`、`feet_slide=-0.15` 对这个捷径还不够强。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+仅修改 `JK03FlatYawEnvCfg`：
+
+- `track_ang_vel_z_exp.weight: 3.0 -> 2.6`
+  - 降低一点纯 yaw tracking 的压迫，避免只要身体 yaw 转起来就足够。
+- `yaw_command_progress.weight: 1.0 -> 0.85`
+  - 保留 yaw 进展，但降低贴地滑转拿分的吸引力。
+- `yaw_wheel_differential_progress.weight: 0.25 -> 0.08`
+  - 大幅降低“左右轮差速就是好”的直接奖励，避免强化前轮支点/后轮滑动。
+- `yaw_wheel_velocity_alignment.weight: 0.10 -> 0.03`
+  - 只保留很轻的方向引导，不再让轮差速成为主目标。
+- `feet_slide.weight: -0.15 -> -0.28`
+  - 加强贴地滑动惩罚，直接针对后轮拖滑和前轮支点滑动。
+- `feet_slide.yaw_slide_scale: 1.0 -> 1.5`
+  - yaw 原地转时滑动惩罚更强，专门压制当前这类 pivot turn。
+- `feet_gait.weight: 0.50 -> 0.65`
+  - 增强成熟 gait 接触时序项，让接触/离地节奏更重要。
+- `joint_pos_penalty.weight: -0.40 -> -0.32`
+  - 略微放松整体关节姿态惩罚，给 hipy/knee 抬腿留一点动作空间。
+- `feet_air_time.weight: 0.30 -> 0.45`
+  - 增强离地时间奖励。
+- `feet_air_time.threshold: 0.16 -> 0.18`
+  - 让短暂擦地不容易拿到好分，更偏向真实离地步。
+
+### 没有修改什么
+
+- 没有新增任何 reward 函数。
+- 没有修改 `rewards.py`。
+- 没有恢复 v28 删除的 `yaw_turn_*`、`yaw_front_*`、`yaw_rear_*`、`yaw_wheel_lateral_*` 实验函数。
+- 没有修改 `jk03.py`、URDF、terrain curriculum。
+- 没有停止或重启云端训练；旧 run 不会热加载 v29。
+
+### 验证结果
+
+- 本地 `py_compile` 已通过：
+  - `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- 已上传到云端 `ssh -p 31979 root@183.147.142.40`。
+- 云端已解压到 `/root/dog-robot-main`。
+- 云端 `py_compile` 已通过：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- 云端已确认关键参数：
+  - `track_ang_vel_z_exp.weight = 2.6`
+  - `yaw_wheel_differential_progress.weight = 0.08`
+  - `feet_slide.weight = -0.28`
+  - `feet_air_time.weight = 0.45`
+
+### 已知风险
+
+- 滑动惩罚和 air time 增强后，早期可能 yaw 变慢，甚至短时间出现不愿意转。
+- 如果 `feet_slide` 下降但 `track_ang_vel_z_exp` / `yaw_command_progress` 大幅掉，说明压滑太强，需要回调一点。
+- 如果 `feet_air_time` 仍长期为负，说明仅靠成熟项参数还不足，下一步应先查 contact sensor/轮子接触定义，而不是继续堆 reward。
+
+### 下一步观察指标
+
+- `Episode_Reward/feet_air_time` 是否从负值向 0 靠近。
+- `Episode_Reward/feet_slide` 是否减轻。
+- `Episode_Reward/feet_gait` 是否保持或上升。
+- `Metrics/base_velocity/error_vel_yaw` 是否没有明显恶化。
+- `Episode_Reward/yaw_command_progress` 是否还能维持基本 yaw。
+- 实测是否从“前轮支点后轮滑”转向“至少有短暂离地/换支撑”。
+
 ## 2026-06-24: remove-experimental-yaw-rewards-v28
 
 状态：按用户要求清理前面多轮试验中叠加出来的 yaw 抬腿/前轮参与/防叠轮 reward，避免 reward 函数越来越多、互相打架。此版本不再继续加新函数，而是做减法，回到更接近成熟开源代码的结构：速度跟踪 + `feet_air_time` + `feet_gait` + `feet_slide`，只保留少量 JK03 键盘 yaw 必需的辅助项。没有修改 `jk03.py`、URDF、terrain curriculum，也没有停止或重启云端训练。
