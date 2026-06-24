@@ -29,6 +29,125 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: unitree-scaled-urdf-gait-yaw-v25
+
+状态：按 Unitree/legged_gym 和仓库内成熟四足配置重新标定 v24 的 gait/air-time/yaw 权重，并按 JK03 URDF 几何重新设置 Flat-Yaw 的腿部动作幅度。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构，也没有新增 reward 函数。
+
+### 为什么修改
+
+v24 虽然回到了 `feet_air_time + GaitReward` 路线，但参数仍有两个问题：
+
+- `feet_gait.params["std"] = 0.12` 太窄，GaitReward 由多个 sync/async 指数项相乘，std 太小会让奖励非常稀疏，早期几乎学不到稳定节奏。
+- `feet_air_time.threshold = 0.08` 太短，容易把“轻微抖一下”也当成有效步态，和 legged_gym/Unitree 常见 `0.5s` air-time 目标相差很大。
+- 当前 JK03 `hipy/knee` 动作尺度只有 `0.24rad`，按 URDF 前腿运动学计算，即使动作打满也只能把轮心抬高约 `2.25cm`，很难出现肉眼明显抬腿。
+
+### 参考到的成熟代码关系
+
+- legged_gym / Unitree RL Gym 基础 reward scale 常见比例：
+  - `tracking_lin_vel = 1.0`
+  - `tracking_ang_vel = 0.5`
+  - `feet_air_time = 1.0`
+  - `action_rate = -0.01`
+  - `torques = -1e-5` 或具体机器人里 `-0.0002`
+- 仓库内 Unitree B2 / Agibot / Anymal 类配置常见比例：
+  - `track_lin_vel_xy_exp = 3.0`
+  - `track_ang_vel_z_exp = 1.5`
+  - `feet_air_time.threshold = 0.5`
+- 仓库内 Zsibot 四足配置打开了：
+  - `feet_air_time.weight = 0.1`
+  - `feet_air_time.threshold = 0.5`
+  - `feet_slide.weight = -0.1`
+  - `feet_gait.weight = 0.5`
+  - `feet_gait` 使用默认 `std = sqrt(0.5) ~= 0.707`、`max_err = 0.2`
+
+因此这版不再用很窄的 `std=0.12`，而是改成更宽的 `std=0.50`；不再用 `0.08s` 的极短 air-time，而是给 JK03 轮腿折中到 `0.15/0.20s`。
+
+### 按 JK03 URDF 做的运动学检查
+
+默认姿态来自 `jk03.py`：
+
+- `hipy = 0.9`
+- `knee = -1.33`
+- `base z = 0.43`
+
+URDF 主要几何：
+
+- 前后 hipx 距离：`x = +/-0.325m`
+- 左右 hipx 距离：`y = +/-0.070m`
+- hipy 横向偏置：`0.1718m`
+- thigh 段：约 `0.20m`
+- knee 到 wheel：约 `0.246m`
+
+计算结果：
+
+- 默认轮心相对 base 的 z 约 `-0.351m`，base z 为 `0.43m` 时轮心世界 z 约 `0.079m`。
+- `hipy/knee` 动作尺度 `0.24rad` 时，理论最大轮心抬升约 `2.25cm`。
+- `hipy/knee` 动作尺度 `0.35rad` 时，理论最大轮心抬升约 `5.33cm`。
+- `hipy/knee` 动作尺度 `0.40rad` 时，理论最大轮心抬升约 `7.13cm`。
+
+所以 Flat-Yaw 专项阶段把 `hipy/knee` 动作幅度调到 `0.40rad`，同时把 `hipx` 限到 `0.04rad`，减少继续靠横摆/拧腿代替抬腿。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- `track_ang_vel_z_exp.weight: 2.5 -> 1.5`
+  - 对齐仓库成熟四足的 yaw tracking 量级，避免 yaw 奖励过强时继续鼓励滑地捷径。
+- `yaw_command_progress.weight: 0.8 -> 0.2`
+  - 这个不是成熟代码主项，只保留轻微进展提示。
+- `feet_slide.weight: -0.35 -> -0.15`
+  - 回到更接近成熟配置的中等滑动惩罚，避免一罚太狠导致不动或怪姿态。
+- `feet_air_time.weight: 0.08 -> 0.10`
+- `feet_air_time.threshold: 0.08 -> 0.15`
+  - 比成熟四足的 `0.5s` 短，但比 v24 的 `0.08s` 更像真正步态。
+- `feet_gait.weight: 0.05 -> 0.10`
+- `feet_gait.params["std"]: 0.20 -> 0.50`
+- `feet_gait.params["max_err"]: 0.25 -> 0.30`
+  - 放宽指数核，让早期接触节奏有可学习梯度。
+
+专用 `JK03FlatYawEnvCfg`：
+
+- `actions.joint_pos.scale` 覆盖为：
+  - `hipx: 0.04`
+  - `hipy: 0.40`
+  - `knee: 0.40`
+- `track_ang_vel_z_exp.weight: 3.0 -> 1.5`
+- `yaw_command_progress.weight: 1.0 -> 0`
+  - Flat-Yaw 直接靠标准 yaw tracking，不再额外奖励“只要转起来就行”的捷径。
+- `feet_slide.weight: -0.45 -> -0.20`
+- `feet_gait.weight: 0.30 -> 0.50`
+- `feet_gait.params["std"]: 0.12 -> 0.50`
+- `feet_gait.params["max_err"]: 0.25 -> 0.30`
+- `feet_air_time.weight: 0.20 -> 0.45`
+- `feet_air_time.threshold: 0.08 -> 0.20`
+
+### 仍然保持关闭
+
+这些 v15-v21 的手写复杂项仍然关闭：
+
+- `yaw_turn_feet_clearance`
+- `yaw_turn_diagonal_step`
+- `yaw_turn_tangential_swing`
+- `yaw_front_wheel_participation`
+- `yaw_front_lift_height_pretrain`
+- `yaw_front_lift_tangential_participation`
+- `yaw_rear_drag_without_front_penalty`
+- `yaw_wheel_lateral_separation_penalty`
+- `yaw_wheel_differential_progress`
+- `yaw_wheel_velocity_alignment`
+
+### 预期变化
+
+- Flat-Yaw 应该更愿意通过 `hipy/knee` 改变腿长/抬轮，而不是靠 `hipx` 横向拧后腿。
+- 由于 `std` 放宽，`feet_gait` 不应该像 v24 那样稀疏。
+- 由于 `feet_air_time.threshold` 提高，如果只是原地轻微抖脚，不会再轻易拿正奖励。
+- 如果 1000-1500 步仍然前轮不动，下一步不应继续堆 reward，而应做 reference motion / contact schedule / imitation 类型的显式步态先验。
+
 ## 2026-06-24: unitree-style-gait-yaw-baseline-v24
 
 状态：模仿 Unitree/legged_gym 成熟四足训练路线做轻量修改：不恢复 v15-v21 的前轮高度、前轮切向、后轮拖动等手写 shaping，而是复用仓库已有 `feet_air_time` 和 `GaitReward`，用速度跟踪 + 通用步态接触节奏 + 滑动惩罚 + 关节正则来引导原地 yaw。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
