@@ -29,6 +29,105 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: remove-experimental-yaw-rewards-v28
+
+状态：按用户要求清理前面多轮试验中叠加出来的 yaw 抬腿/前轮参与/防叠轮 reward，避免 reward 函数越来越多、互相打架。此版本不再继续加新函数，而是做减法，回到更接近成熟开源代码的结构：速度跟踪 + `feet_air_time` + `feet_gait` + `feet_slide`，只保留少量 JK03 键盘 yaw 必需的辅助项。没有修改 `jk03.py`、URDF、terrain curriculum，也没有停止或重启云端训练。
+
+### 为什么修改
+
+用户明确反馈：
+
+- 之前每次遇到问题就新增 reward，导致函数数量太多，像“屎山”一样难判断。
+- v20/v21 以后动作越来越夸张，后腿大幅拧动，前腿依旧不抬。
+- 成熟开源代码通常不会为一个问题堆很多定制 reward，而是在基础 tracking、air time、gait、slide 这些稳定项上做少量调参。
+
+本次判断：
+
+- 很多 yaw 实验项已经是 `weight = 0`，但仍留在配置和代码里，增加理解成本和误开风险。
+- 强行指定前轮参与、对角摆动、相位超时、左右轮距等函数没有稳定带来抬腿，反而让优化目标变得混乱。
+- 当前更应该先保留清晰、可解释、成熟风格的 reward 面，再基于数据小幅调整。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+删除的实验性 reward 函数：
+
+- `yaw_hipx_twist_without_yaw_progress`
+- `yaw_turn_feet_clearance`
+- `yaw_turn_diagonal_step`
+- `yaw_turn_air_time_deficit`
+- `yaw_turn_phase_timeout`
+- `yaw_turn_tangential_swing`
+- `yaw_front_wheel_participation`
+- `yaw_front_lift_height_pretrain`
+- `yaw_front_lift_tangential_participation`
+- `yaw_rear_drag_without_front_penalty`
+- `yaw_wheel_lateral_separation_penalty`
+
+同步删除的辅助函数：
+
+- `_bounded_phase_score`
+- `_body_frame_relative_states`
+- `_yaw_tangential_body_speed`
+
+同步删除的配置：
+
+- `JK03RewardsCfg` 中上述 reward 的 `RewTerm` 定义。
+- `JK03FlatEnvCfg.__post_init__` 中上述 reward 的零权重和参数赋值。
+- `JK03FlatYawEnvCfg.__post_init__` 中上述 reward 的零权重和参数赋值。
+
+保留的核心方向：
+
+- `track_lin_vel_xy_exp`、`track_ang_vel_z_exp`：基础速度跟踪。
+- `feet_air_time`、`feet_gait`、`feet_slide`：成熟四足/轮腿训练里更常见的步态和防滑项。
+- `yaw_command_progress`：简单直接的 yaw 进展奖励。
+- `yaw_wheel_differential_progress`、`yaw_wheel_velocity_alignment`：JK03 轮腿结构下用于保证 `X/Z` 键盘 yaw 有响应的轻量辅助。
+- `yaw_stuck_with_command`、`yaw_turn_joint_posture_l2`：保留为基础防卡住和 hipx 约束，不再额外叠复杂形态奖励。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 `robot_lab-main/source/robot_lab/data/Robots/jk03/jk03_description/urdf/jk03.urdf`。
+- 没有修改 terrain curriculum：`terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)`。
+- 没有改 `play.py` 的 v27 键盘 yaw 输入，`X/Z` 仍使用完整 yaw range。
+- 没有停止、重启当前云端训练；正在运行的进程不会热加载这次代码，需要新开训练才会使用 v28。
+
+### 验证结果
+
+- 本地 `py_compile` 已通过：
+  - `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+  - `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- 本地残留扫描已确认上述实验性函数名在 `velocity` 训练代码里无残留。
+- 已上传到云端 `ssh -p 31979 root@183.147.142.40`。
+- 云端已解压到 `/root/dog-robot-main`。
+- 云端 `py_compile` 已通过同三个 Python 文件。
+- 云端残留扫描已确认上述实验性函数名在 `velocity` 训练代码里无残留。
+
+### 已知风险
+
+- 这次删除的是实验项，不会自动让当前模型学会抬腿；它的作用是让后续调参回到干净、可控的 reward 面。
+- 删除前轮强制参与和后轮拖动惩罚后，短期训练可能更偏向轮子差速/贴地 yaw，需要通过 `feet_slide`、`feet_air_time`、`feet_gait` 的成熟参数继续小步调。
+- 正在跑的旧 run 不会热加载 v28，如果继续用旧 run 测试，仍可能看到旧版本行为。
+
+### 下一步观察指标
+
+- `Metrics/base_velocity/error_vel_yaw`
+- `Episode_Reward/track_ang_vel_z_exp`
+- `Episode_Reward/yaw_command_progress`
+- `Episode_Reward/yaw_wheel_differential_progress`
+- `Episode_Reward/feet_air_time`
+- `Episode_Reward/feet_gait`
+- `Episode_Reward/feet_slide`
+- `Episode_Reward/joint_deviation_hipx_l1`
+- `Episode_Reward/joint_pos_penalty`
+
 ## 2026-06-24: flat-yaw-keyboard-response-v27
 
 状态：针对 Flat-Yaw 中按 `X/Z` 仍几乎没有转向反应的问题，先把目标从“抬腿转向”收窄为“yaw 命令必须能驱动身体明显转起来”。没有修改 `jk03.py`、URDF、terrain curriculum，也没有停止或重启云端训练。
