@@ -29,6 +29,112 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: mature-antislide-yaw-baseline-v22
+
+状态：大幅回退这一周不断堆叠的抬腿/前轮参与专用 reward，改回更接近 legged_gym / IsaacLab 成熟 locomotion baseline 的写法：用速度跟踪和 yaw 进展定义任务，用 feet slide、关节姿态、动作平滑和 stuck penalty 约束物理行为。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v15-v21 的实验已经暴露出明显 reward hacking：
+
+- `yaw_front_lift_height_pretrain` 能让前腿有“高度”信号，但策略可能学成收腿、趴开或固定前脚当轴。
+- `yaw_front_lift_tangential_participation`、`yaw_turn_feet_clearance`、`yaw_turn_tangential_swing` 等项叠加后，动作越来越像在满足局部 reward，而不是自然转向。
+- `yaw_rear_drag_without_front_penalty`、`yaw_wheel_lateral_separation_penalty` 等定制惩罚继续叠加后，前轮更容易锁死，后腿反而出现大幅扭动。
+- 普通 Flat 任务里 yaw-only 样本比例有限，抬腿 shaping 信号被稀释，训练容易回到“前轮当支点、后轮滑着推”的捷径。
+
+这次不再继续直接奖励“抬腿形状”，而是测试更干净的假设：
+
+```text
+必须完成 yaw tracking / yaw progress；
+不能靠接触滑动拿 yaw；
+不能靠过大的 hipx/关节扭动拿 yaw；
+也不能直接站住不动。
+```
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- 降低关节动作幅度，减少“后腿大幅拧到前腿位置”的空间：
+  - `hipx` action scale：`0.08 -> 0.06`
+  - `hipy/knee` action scale：`0.22 -> 0.20`
+- 加强标准 yaw 任务奖励：
+  - `track_ang_vel_z_exp.weight: 2.0 -> 2.5`
+  - `yaw_command_progress.weight: 0.5 -> 0.8`
+- 关闭轮子差速捷径奖励：
+  - `yaw_wheel_differential_progress.weight: 0.2 -> 0`
+  - `yaw_wheel_velocity_alignment.weight: 0.1 -> 0`
+- 加强滑动惩罚，并取消 yaw 转向时的滑动惩罚折扣：
+  - `feet_slide.weight: -0.12 -> -0.35`
+  - `feet_slide.params["yaw_slide_scale"]: 0.3 -> 1.0`
+- 加强关节正则，减少后腿/hipx 夸张扭动：
+  - `joint_deviation_hipx_l1.weight: -0.30 -> -0.55`
+  - `joint_pos_penalty.weight: -0.45 -> -0.55`
+  - `yaw_turn_joint_posture_l2.weight: -0.08 -> -0.15`
+- 关闭所有手写抬腿/前轮参与/后轮拖动/轮距限制 shaping：
+  - `yaw_turn_feet_clearance.weight = 0`
+  - `yaw_turn_diagonal_step.weight = 0`
+  - `yaw_turn_tangential_swing.weight = 0`
+  - `yaw_front_wheel_participation.weight = 0`
+  - `yaw_front_lift_height_pretrain.weight = 0`
+  - `yaw_front_lift_tangential_participation.weight = 0`
+  - `yaw_rear_drag_without_front_penalty.weight = 0`
+  - `yaw_wheel_lateral_separation_penalty.weight = 0`
+
+专用 `JK03FlatYawEnvCfg`：
+
+- 保持低速原地 yaw 命令范围：
+  - `lin_vel_x = 0`
+  - `lin_vel_y = 0`
+  - `ang_vel_z = (-0.35, 0.35)`
+- 使用同样的成熟基线逻辑：
+  - `track_ang_vel_z_exp.weight = 3.0`
+  - `yaw_command_progress.weight = 1.0`
+  - `yaw_stuck_with_command.weight = -4.0`
+  - `feet_slide.weight = -0.45`
+  - `feet_slide.params["yaw_slide_scale"] = 1.0`
+  - `joint_deviation_hipx_l1.weight = -0.55`
+  - `joint_pos_penalty.weight = -0.55`
+  - `yaw_turn_joint_posture_l2.weight = -0.15`
+- Flat-Yaw 里同样关闭：
+  - 轮子差速奖励
+  - 前轮抬高预训练
+  - 前轮切向参与
+  - 对角踏步
+  - 后轮单独拖动惩罚
+  - 轮距/叠轮惩罚
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有删除 `rewards.py` 里的旧函数定义；这些函数暂时保留为禁用状态，避免旧日志/旧配置无法读取，也方便以后做对照实验。新训练通过 `disable_zero_weight_rewards()` 不会启用这些项。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 云端已上传到 `/root/jk03_v22_mature_antislide_yaw_baseline_patch.tar.gz` 并解压到 `/root/dog-robot-main`。
+- 云端 `conda activate isaaclab` 后 `python -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+
+### 已知风险
+
+- `feet_slide` 从 `-0.12` 提到 `-0.35`，并且 yaw 时不再打折，可能让早期策略短暂变慢甚至偏保守；因此保留了较强 `yaw_stuck_with_command`，防止它直接选择不动。
+- 这一版不再直接奖励“抬腿”，所以 TensorBoard 上抬腿类 reward 会消失或为 0；判断重点应改成：yaw error 是否下降、feet_slide 是否下降、joint/hipx penalty 是否不过度恶化、视频里是否不再后腿夸张扭动。
+- 如果仍然只滑不转，下一步再考虑引入明确接触节拍或参考动作，而不是继续堆单点 shaping reward。
+
 ## 2026-06-24: front-lift-progress-gated-v21
 
 状态：在 v20 `yaw_front_lift_height_pretrain` 基础上继续优化，解决一个潜在问题：策略可能只把前腿往身体里收一点来拿“高度分”，但不真正沿 yaw 切向摆动，也不产生真实 yaw 转向。本次把高度预训练奖励改成“高度为主 + 切向摆动加成 + yaw 进展加成”的结构。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
