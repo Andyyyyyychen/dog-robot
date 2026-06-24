@@ -29,6 +29,114 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: lift-contact-diagnostic-v30
+
+状态：新增 JK03 抬腿/contact 诊断版，只加工具，不改 reward、不改训练配置、不新增训练函数。目标是先确认“动作空间和接触传感器是否真的允许 wheel 离地并产生 air_time”，避免继续盲目调奖励权重。
+
+### 为什么修改
+
+v29 数据和实际测试显示：
+
+- hipx 拧关节已经缓解。
+- 但前轮仍然贴地当支点。
+- 后轮也没有真实抬起，主要靠贴地滑动完成 yaw。
+- `feet_air_time` 窗口均值仍为负，说明当前策略没有形成有效离地/落地事件。
+
+因此下一步不能继续先改 reward，而要先诊断：
+
+- `.*_wheel` body 和 contact sensor body 是否匹配正确。
+- 前 12 个腿部 action 是否真的按预期控制 hipy/knee。
+- 给 hipy/knee 一个确定的开环动作后，wheel body 的 body-frame z 是否会上升。
+- contact sensor 是否能记录 `current_air_time` / `first_air`。
+
+### 修改文件
+
+- `robot_lab-main/scripts/tools/check_jk03_lift_contact.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增诊断脚本 `check_jk03_lift_contact.py`：
+
+- 加载 `RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0`，默认 `num_envs=1`。
+- 只在运行时关闭随机 reset / push / 质量扰动，保证诊断可重复。
+- 不修改任何训练 reward、env cfg 源文件、URDF 或资产参数。
+- 输出 action layout：
+  - 前 12 个通道按 `fl/fr/hl/hr` 的 `hipx/hipy/knee` 映射。
+  - 后 4 个通道按 `fl/fr/hl/hr` wheel velocity 映射。
+- 输出 body/contact 映射：
+  - `fl_wheel/fr_wheel/hl_wheel/hr_wheel` 在 robot body 里的 id。
+  - 同名 body 在 `contact_forces` sensor 里的 id。
+- 依次测试 8 个开环抬腿相位：
+  - `all_h+_k+`
+  - `all_h+_k-`
+  - `all_h-_k+`
+  - `all_h-_k-`
+  - `front_h+_k+`
+  - `hind_h+_k+`
+  - `diag_fl_hr_h+_k+`
+  - `diag_fr_hl_h+_k+`
+- 每个相位报告：
+  - `z_delta`：wheel body 在 base/body 坐标系下的最大高度增量。
+  - `max_air`：contact sensor 记录到的最大当前离地时间。
+  - `contact_frac`：这一段时间内每个 wheel 仍接触地面的比例。
+  - `first_air_events`：传感器检测到首次离地事件的次数。
+  - `max_joint_delta`：被测试 hipy/knee 是否真的动起来。
+  - `dones`：测试中是否触发 episode reset。
+- 输出诊断提示：
+  - 关节几乎没动：优先查 action 顺序、scale、关节限制或 actuator。
+  - z 上升但 air_time 不变：优先查 contact body 映射或接触阈值。
+  - 关节动了但 z 不上升：优先查动作正负号、连杆几何或默认姿态。
+
+### 没有修改什么
+
+- 没改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没改 `robot_lab-main/source/robot_lab/data/Robots/jk03/jk03_description/urdf/jk03.urdf`。
+- 没改 terrain curriculum。
+- 没改 `flat_env_cfg.py` / `rough_env_cfg.py` / `rewards.py`。
+- 没新增任何训练 reward 函数。
+
+### 验证结果
+
+- 本地执行：
+  - `python3 -m py_compile robot_lab-main/scripts/tools/check_jk03_lift_contact.py`
+  - 通过。
+- 云端上传：
+  - 已上传到 `/root/dog-robot-main/robot_lab-main/scripts/tools/check_jk03_lift_contact.py`。
+- 云端执行：
+  - `python -m py_compile scripts/tools/check_jk03_lift_contact.py`
+  - 通过。
+
+### 运行方式
+
+建议在云端训练空闲或可以接受短暂降速时运行：
+
+```bash
+cd /root/dog-robot-main/robot_lab-main
+source /opt/conda/etc/profile.d/conda.sh
+conda activate isaaclab
+
+/root/IsaacLab/isaaclab.sh -p scripts/tools/check_jk03_lift_contact.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0 \
+  --headless \
+  --num_envs 1 \
+  --phase_time 1.25 \
+  --settle_time 0.75
+```
+
+### 已知风险
+
+- 该脚本会启动一个 Isaac Sim 诊断进程；如果训练和 play 已经占满 GPU，可能运行变慢或启动失败。
+- 如果当前训练正在跑，建议先只做云端 `py_compile`，等训练间隙再跑完整诊断。
+
+### 下一步观察指标
+
+- `max_joint_delta` 是否明显大于 0。
+- `z_delta` 是否能超过 `0.015 m`。
+- `max_air` 是否能超过 `0.015 s`。
+- `contact_frac` 是否能从接近 `1.0` 降下来。
+- 如果开环动作能产生 air_time，再回头调训练；如果开环动作都不行，先查动作正负号、URDF 几何、接触传感器匹配和关节限制。
+
 ## 2026-06-24: flat-yaw-less-pivot-more-step-v29
 
 状态：针对用户测试反馈“拧关节明显好很多，但前轮仍贴地当支点、后轮贴地滑动完成转向”，本轮只做 Flat-Yaw 参数调节，不新增 reward 函数，不恢复 v28 删除的实验函数。目标是减少轮差速贴地转向捷径，提高已有成熟项 `feet_air_time`、`feet_gait`、`feet_slide` 的相对作用。
