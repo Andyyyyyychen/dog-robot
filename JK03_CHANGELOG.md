@@ -29,6 +29,103 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: unitree-style-gait-yaw-baseline-v24
+
+状态：模仿 Unitree/legged_gym 成熟四足训练路线做轻量修改：不恢复 v15-v21 的前轮高度、前轮切向、后轮拖动等手写 shaping，而是复用仓库已有 `feet_air_time` 和 `GaitReward`，用速度跟踪 + 通用步态接触节奏 + 滑动惩罚 + 关节正则来引导原地 yaw。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v23 当前视频现象仍然是：
+
+- 前轮基本不动，像固定轴一样贴地。
+- 后轮被拖着/滑着完成 yaw。
+- TensorBoard 里 `yaw_command_progress` 上升，但 `feet_air_time` 仍为负，`feet_slide` 继续变差。
+
+走查后判断：
+
+- 只靠 `feet_slide` 和小权重 `feet_air_time`，并不能明确打破“前轮当轴、后轮拖转”的局部最优。
+- 成熟四足代码通常不是直接写“前轮必须抬到某个高度”，而是用 `feet_air_time` 让脚有离地时间，再用类似 trot 的接触节奏项鼓励对角步态。
+- 仓库已有 `GaitReward`，它正是“FL+HR 同步、FR+HL 同步，两组对角互相异步”的接触时序奖励，和 Unitree/legged_gym 路线更接近。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- 降低 `feet_air_time` 阈值，让早期短离地也能有正向梯度：
+  - `feet_air_time.params["threshold"]: 0.12 -> 0.08`
+- 轻量打开 `feet_gait`，只在 yaw-only 命令附近生效：
+  - `feet_gait.weight: 0 -> 0.05`
+  - `feet_gait.params["std"]: 0.45 -> 0.20`
+  - `feet_gait.params["max_err"]: 0.30 -> 0.25`
+  - `synced_feet_pair_names = (("fl_wheel", "hr_wheel"), ("fr_wheel", "hl_wheel"))`
+  - `yaw_command_only = True`
+  - `max_xy_command = 0.12`
+
+专用 `JK03FlatYawEnvCfg`：
+
+- 保持 `vx=0, vy=0, yaw=(-0.35, 0.35)` 的原地 yaw 专项任务。
+- 更强地打开 Unitree-style 对角步态节奏：
+  - `feet_gait.weight: 0 -> 0.30`
+  - `feet_gait.params["std"] = 0.12`
+  - `feet_gait.params["max_err"] = 0.25`
+- 同样降低 air-time 阈值：
+  - `feet_air_time.params["threshold"]: 0.12 -> 0.08`
+
+### 本地计算/检查
+
+检查了 `GaitReward` 对接触节奏的数值敏感度：
+
+- 当 `std=0.45` 时，接触/离地时差 `0.25s` 仍可能保留较高异步项乘积，太宽松。
+- 当 `std=0.12` 时，时差 `0.25s` 的四个异步项乘积约降到 `0.0155`，更能区分“真正交替”和“全脚贴地/乱拖”。
+
+检查 `feet_air_time` 阈值：
+
+- 旧阈值 `0.12`：`0.10s` 短离地仍是负奖励。
+- 新阈值 `0.08`：`0.10s` 短离地变成正奖励，早期更容易从“完全不抬”过渡到“小幅抬脚”。
+
+### 仍然关闭的内容
+
+这些复杂手写 shaping 仍然保持关闭：
+
+- `yaw_turn_feet_clearance`
+- `yaw_turn_diagonal_step`
+- `yaw_turn_tangential_swing`
+- `yaw_front_wheel_participation`
+- `yaw_front_lift_height_pretrain`
+- `yaw_front_lift_tangential_participation`
+- `yaw_rear_drag_without_front_penalty`
+- `yaw_wheel_lateral_separation_penalty`
+- `yaw_wheel_differential_progress`
+- `yaw_wheel_velocity_alignment`
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有新增 reward 函数。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- GitHub：已提交并推送到 `main`。
+- 云端：已上传到 `ssh -p 31979 root@183.147.142.40` 的 `/root/dog-robot-main/robot_lab-main`，并在云端通过 `py_compile`。
+
+### 已知风险
+
+- `feet_gait` 如果过强，可能让早期动作出现僵硬节奏或小跳；所以普通 Flat 只给 `0.05`，Flat-Yaw 才给 `0.30`。
+- 这版最应该先跑 `RobotLab-Isaac-Velocity-Flat-Yaw-JK03-v0`，而不是普通 Flat；普通 Flat 的前进/横移/yaw 混合命令仍会稀释抬脚转向信号。
+- 如果 Flat-Yaw 到 1000-1500 步仍然前轮完全不动，下一步应考虑参考 gait/contact schedule 或 imitation/reference action，而不是继续增加单点前轮高度 reward。
+
 ## 2026-06-24: mature-air-time-yaw-baseline-v23
 
 状态：在 v22 mature anti-slide baseline 基础上走查后修正。v22 只靠 `feet_slide` 惩罚和 yaw tracking/yaw progress，理论上可以让策略发现“抬脚能少滑”，但这个信号是间接的、稀疏的，没有正向告诉 policy “离地一步是好事”。成熟 locomotion baseline 里通常会保留轻量 `feet_air_time`，因此本次复用仓库已有 `mdp.feet_air_time`，不新增复杂手写前轮 shaping，不恢复 v15-v21 那套前轮/后轮定制奖励。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
