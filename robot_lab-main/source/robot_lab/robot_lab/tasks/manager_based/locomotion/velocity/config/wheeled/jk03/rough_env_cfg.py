@@ -373,6 +373,8 @@ class JK03RewardsCfg(RewardsCfg):
             "max_xy_command": 0.12,
             "min_height": -0.35,
             "target_height": -0.30,
+            "target_tangential_speed": 0.06,
+            "max_yaw_rate": 0.35,
             "front_body_names": ("fl_wheel", "fr_wheel"),
             "asset_cfg": SceneEntityCfg("robot"),
         },

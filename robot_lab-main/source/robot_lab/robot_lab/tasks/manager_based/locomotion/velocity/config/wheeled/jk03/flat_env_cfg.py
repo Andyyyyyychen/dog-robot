@@ -211,6 +211,8 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.yaw_front_lift_height_pretrain.params["max_xy_command"] = 0.12
         self.rewards.yaw_front_lift_height_pretrain.params["min_height"] = -0.35
         self.rewards.yaw_front_lift_height_pretrain.params["target_height"] = -0.30
+        self.rewards.yaw_front_lift_height_pretrain.params["target_tangential_speed"] = 0.06
+        self.rewards.yaw_front_lift_height_pretrain.params["max_yaw_rate"] = 0.35
         self.rewards.yaw_front_lift_tangential_participation.weight = 0.75
         self.rewards.yaw_front_lift_tangential_participation.params["command_threshold"] = 0.06
         self.rewards.yaw_front_lift_tangential_participation.params["max_xy_command"] = 0.12
@@ -292,6 +294,8 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.yaw_front_wheel_participation.weight = 0.04
         self.rewards.yaw_front_lift_height_pretrain.weight = 1.20
         self.rewards.yaw_front_lift_height_pretrain.params["target_height"] = -0.305
+        self.rewards.yaw_front_lift_height_pretrain.params["target_tangential_speed"] = 0.05
+        self.rewards.yaw_front_lift_height_pretrain.params["max_yaw_rate"] = 0.35
         self.rewards.yaw_front_lift_tangential_participation.weight = 1.40
         self.rewards.yaw_rear_drag_without_front_penalty.weight = -0.26
         self.rewards.yaw_wheel_lateral_separation_penalty.weight = -0.08

@@ -29,6 +29,108 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: front-lift-progress-gated-v21
+
+状态：在 v20 `yaw_front_lift_height_pretrain` 基础上继续优化，解决一个潜在问题：策略可能只把前腿往身体里收一点来拿“高度分”，但不真正沿 yaw 切向摆动，也不产生真实 yaw 转向。本次把高度预训练奖励改成“高度为主 + 切向摆动加成 + yaw 进展加成”的结构。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v20 的优点是能打破 `height * air_time * tangential_speed` 早期全 0 的问题，让前轮开始有抬起梯度。但它也有风险：
+
+- 只看前轮相对 base 的 z 高度，可能学成“收前腿/缩腿”，而不是真正抬轮转向。
+- 可能只抬一只前轮，TensorBoard 上 `yaw_front_lift_height_pretrain` 上升，但 `yaw_front_lift_tangential_participation` 和 `yaw_turn_tangential_swing` 仍然接近 0。
+- 如果高度奖励太独立，policy 可能把“抬高前轮”和“完成 yaw”拆开，出现抬了但不转。
+
+本次不是删除 v20，而是给它加软门控：早期仍然可以靠高度拿到基础分，但只有同时出现切向摆动和真实 yaw 进展时才能拿满分。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+修改 `yaw_front_lift_height_pretrain`：
+
+- 新增参数：
+  - `target_tangential_speed`
+  - `max_yaw_rate`
+- 继续计算基础前轮高度分：
+  - `single_front_lift = max(lift_score)`
+  - `both_front_lift = mean(lift_score)`
+  - `lift_reward = 0.65 * single_front_lift + 0.35 * both_front_lift`
+- 新增切向摆动分：
+  - 使用 `_yaw_tangential_body_speed(front_pos_b, front_vel_b, yaw_command)`。
+  - 只奖励沿命令 yaw 方向的前轮切向速度。
+  - `tangent_score = mean(front_tangent_speed) / target_tangential_speed`，并 clamp 到 0-1。
+- 新增真实 yaw 进展分：
+  - `signed_yaw_rate = sign(yaw_command) * root_ang_vel_b[:, 2]`
+  - `yaw_progress_score = signed_yaw_rate / max_yaw_rate`，并 clamp 到 0-1。
+- 最终奖励改为：
+
+```python
+reward = lift_reward * (0.65 + 0.20 * tangent_score + 0.15 * yaw_progress_score)
+```
+
+含义：
+
+- 只有高度、不摆动、不转向：最多拿 65% 的预训练分。
+- 高度 + 切向摆动：拿更多。
+- 高度 + 切向摆动 + 真实 yaw 进展：才能拿满。
+
+配置参数：
+
+- `JK03RewardsCfg` 默认：
+  - `target_tangential_speed = 0.06`
+  - `max_yaw_rate = 0.35`
+- 普通 Flat：
+  - `target_tangential_speed = 0.06`
+  - `max_yaw_rate = 0.35`
+- Flat-Yaw：
+  - `target_tangential_speed = 0.05`
+  - `max_yaw_rate = 0.35`
+
+Flat-Yaw 的 `target_tangential_speed` 稍低，是因为它是低速原地 yaw 预训练，早期只要求形成小幅切向摆动。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+- 没有进一步加大 `feet_slide`，避免把策略再次压成不动。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 云端已上传到 `/root/jk03_v21_front_lift_progress_gated_patch.tar.gz` 并解压到 `/root/dog-robot-main`。
+- 云端 `conda activate isaaclab` 后 `python -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+
+### 已知风险
+
+- 如果 `yaw_front_lift_height_pretrain` 下降但 `yaw_front_lift_tangential_participation` 上升，这是正常的，说明策略从“只抬高”转向“抬起并摆动”。
+- 如果三个抬腿相关指标都下降，可能是软门控过早，需要回调 `0.65` 基础保底或降低 `target_tangential_speed`。
+- 如果 yaw tracking 变差但抬腿变明显，下一步应该微调 `track_ang_vel_z_exp` / `yaw_command_progress`，而不是马上加滑动惩罚。
+
+### 下一步观察指标
+
+- `yaw_front_lift_height_pretrain`
+- `yaw_front_lift_tangential_participation`
+- `yaw_turn_tangential_swing`
+- `yaw_command_progress`
+- `track_ang_vel_z_exp`
+- `feet_slide`
+- `yaw_rear_drag_without_front_penalty`
+
 ## 2026-06-24: dense-front-lift-pretrain-v20
 
 状态：根据最新反馈“Flat-Yaw 最新版本 1600 step 仍然不能抬腿转向”，本次不再继续单纯加大 `feet_slide` 惩罚，而是新增一个低门槛、密集触发的前轮高度预训练奖励 `yaw_front_lift_height_pretrain`。目标是先让 policy 在 yaw 命令下学会把前轮/前脚往上收，再由已有的 `yaw_front_lift_tangential_participation` 和 `yaw_turn_tangential_swing` 继续塑造成切向摆动。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。

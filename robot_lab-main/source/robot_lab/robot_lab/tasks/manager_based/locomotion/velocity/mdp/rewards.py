@@ -1017,6 +1017,8 @@ def yaw_front_lift_height_pretrain(
     max_xy_command: float,
     min_height: float,
     target_height: float,
+    target_tangential_speed: float,
+    max_yaw_rate: float,
     front_body_names: tuple[str, str],
 ) -> torch.Tensor:
     """Reward front wheels moving upward during in-place yaw turns before full air-time emerges."""
@@ -1027,15 +1029,28 @@ def yaw_front_lift_height_pretrain(
     active_command = torch.logical_and(torch.abs(yaw_command) > command_threshold, command_xy_norm <= max_xy_command)
 
     front_body_ids = list(asset.find_bodies(front_body_names)[0])
-    front_pos_b, _ = _body_frame_relative_states(env, asset, front_body_ids)
+    front_pos_b, front_vel_b = _body_frame_relative_states(env, asset, front_body_ids)
     height_span = max(target_height - min_height, 1.0e-6)
     lift_score = torch.clamp((front_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
 
     # Give an early signal when either front wheel starts lifting, while still
-    # preferring both front wheels to become usable over time.
+    # preferring both front wheels to become usable over time.  The tangential
+    # and yaw-progress gates reduce the reward for simply tucking the front legs
+    # without beginning the commanded turn.
     single_front_lift = torch.max(lift_score, dim=1).values
     both_front_lift = torch.mean(lift_score, dim=1)
-    reward = 0.65 * single_front_lift + 0.35 * both_front_lift
+    lift_reward = 0.65 * single_front_lift + 0.35 * both_front_lift
+
+    tangent_speed = torch.clamp(_yaw_tangential_body_speed(front_pos_b, front_vel_b, yaw_command), min=0.0)
+    tangent_score = torch.clamp(
+        torch.mean(tangent_speed, dim=1) / max(target_tangential_speed, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    signed_yaw_rate = torch.sign(yaw_command) * asset.data.root_ang_vel_b[:, 2]
+    yaw_progress_score = torch.clamp(signed_yaw_rate / max(max_yaw_rate, 1.0e-6), min=0.0, max=1.0)
+
+    reward = lift_reward * (0.65 + 0.20 * tangent_score + 0.15 * yaw_progress_score)
     reward *= active_command.float()
     reward *= _upright_scale(env)
     return reward
