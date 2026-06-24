@@ -29,6 +29,133 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: lift-contact-diagnostic-action-layout-fix-v30.2
+
+状态：继续修复 v30 诊断脚本。云端输出显示真实 `robot_joint_names` 顺序不是“每条腿 3 个关节连续排列”，而是：
+
+```text
+fl_hipx, fr_hipx, hl_hipx, hr_hipx,
+fl_hipy, fr_hipy, hl_hipy, hr_hipy,
+fl_knee, fr_knee, hl_knee, hr_knee,
+fl_wheel, fr_wheel, hl_wheel, hr_wheel
+```
+
+原 v30 脚本硬编码了错误的假设：
+
+```python
+fl: 0, fr: 3, hl: 6, hr: 9
+```
+
+这会导致“给某条腿 hipy/knee 抬腿动作”时实际打到错误 action 通道，诊断结果不可信。
+
+### 修改文件
+
+- `robot_lab-main/scripts/tools/check_jk03_lift_contact.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+- 删除硬编码 `LEG_ACTION_INDEX` 和 `WHEEL_ACTION_INDEX`。
+- 新增 `entity_joint_names()` / `entity_body_names()`，兼容不同 IsaacLab 版本的 joint/body name 读取方式。
+- 新增 `build_action_layout()`：
+  - 从 live robot 的 `robot_joint_names` 自动建立 `action_index_by_joint`。
+  - 自动建立 `wheel_action_index_by_leg`。
+  - 自动建立 `joint_index_by_name`，用于统计真实 joint delta。
+- `build_leg_action()` 改成按 joint name 写 action，不再按错误的腿顺序写 action。
+- `run_phase()` 的 `max_joint_delta` 改成按真实 joint index 统计。
+- 增加 `[RUN] starting ...` 和 `flush=True`，如果后续卡在某个 phase，日志能看出卡点。
+
+### 没有修改什么
+
+- 没改训练 reward。
+- 没改 Flat/Flat-Yaw 配置。
+- 没改 `jk03.py`。
+- 没改 URDF。
+- 没改 terrain curriculum。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile robot_lab-main/scripts/tools/check_jk03_lift_contact.py` 通过。
+- 云端 `python -m py_compile scripts/tools/check_jk03_lift_contact.py` 通过。
+- 云端短烟测通过：
+  - `all_h+_k+`：`z_delta=[0.0338, 0.0314, 0.0436, 0.0385]`，`max_air=[0.0200, 0.0450, 0.0250, 0.0400]`，`verdict=PASS`。
+  - `hind_h+_k+`：`verdict=PASS`。
+  - `diag_fl_hr_h+_k+`：`verdict=PASS`。
+  - 总结输出：`PASS: scripted actions can create wheel air_time.`
+
+### 诊断结论
+
+- JK03 在当前 URDF、actuator、contact sensor 和 action scale 下，开环 hipy/knee 动作可以让 wheel body 离地并产生 measurable `air_time`。
+- 因此“完全无法抬腿”不是物理/传感器硬故障。
+- 当前 PPO 不抬腿，更可能是 reward/command 分布/探索策略下，贴地 pivot turn 仍然是更容易拿分的策略。
+- 后续修改应保持成熟代码风格，只在少量核心项里调整比例；不要再堆大量实验性 reward 函数。
+
+## 2026-06-24: lift-contact-diagnostic-step-api-fix-v30.1
+
+状态：修复 v30 诊断脚本在云端 IsaacLab/Gymnasium 接口下的 `env.step()` 返回值兼容问题，不改训练 reward、不改训练配置。
+
+### 为什么修改
+
+用户运行 `check_jk03_lift_contact.py` 后报错：
+
+```text
+ValueError: too many values to unpack (expected 4)
+```
+
+原因是云端环境的 `env.step(action)` 返回新版 Gymnasium 格式：
+
+```python
+(obs, reward, terminated, truncated, info)
+```
+
+而脚本按旧接口写成：
+
+```python
+(obs, reward, dones, info)
+```
+
+因此不是机器人、reward 或 contact sensor 的问题，是诊断脚本兼容性问题。
+
+### 修改文件
+
+- `robot_lab-main/scripts/tools/check_jk03_lift_contact.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增辅助函数：
+
+```python
+def step_and_get_dones(env, action: torch.Tensor) -> torch.Tensor:
+    result = env.step(action)
+    if len(result) == 5:
+        _, _, terminated, truncated, _ = result
+        return torch.logical_or(terminated, truncated)
+    if len(result) == 4:
+        _, _, dones, _ = result
+        return dones
+    raise RuntimeError(...)
+```
+
+含义：
+
+- 如果是新版 5 返回值，就把 `terminated` 和 `truncated` 合成一个 `dones`。
+- 如果是旧版 4 返回值，就直接使用 `dones`。
+- 这样同一个诊断脚本可以兼容不同 IsaacLab/Gym 版本。
+
+### 没有修改什么
+
+- 没改 `flat_env_cfg.py` / `rough_env_cfg.py` / `rewards.py`。
+- 没改 `jk03.py`。
+- 没改 URDF。
+- 没改 terrain curriculum。
+- 没新增训练 reward 函数。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile robot_lab-main/scripts/tools/check_jk03_lift_contact.py` 待执行。
+- 云端上传和云端验证待执行。
+
 ## 2026-06-24: lift-contact-diagnostic-v30
 
 状态：新增 JK03 抬腿/contact 诊断版，只加工具，不改 reward、不改训练配置、不新增训练函数。目标是先确认“动作空间和接触传感器是否真的允许 wheel 离地并产生 air_time”，避免继续盲目调奖励权重。
