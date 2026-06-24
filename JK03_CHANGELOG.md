@@ -29,6 +29,83 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: flat-yaw-keyboard-response-v27
+
+状态：针对 Flat-Yaw 中按 `X/Z` 仍几乎没有转向反应的问题，先把目标从“抬腿转向”收窄为“yaw 命令必须能驱动身体明显转起来”。没有修改 `jk03.py`、URDF、terrain curriculum，也没有停止或重启云端训练。
+
+### 为什么修改
+
+用户测试 v26 时发现：
+
+- `X/Z` 按下后机器人仍几乎不转。
+- TensorBoard 中 `yaw error` 只缓慢下降，`track_ang_vel_z_exp` 基本卡住。
+- `feet_air_time` 仍为负，说明抬腿还没开始。
+
+原因判断：
+
+- Flat-Yaw v26 的 yaw 训练范围只有 `(-0.35, 0.35)`。
+- `play.py` 键盘测试时又只使用 `0.70 * yaw_range`，所以按 `X/Z` 实际只给约 `0.245 rad/s`。
+- Flat-Yaw 继承了普通 Flat 的 `command_levels_ang_vel` curriculum，早期 yaw 命令还会被进一步缩小。
+- `yaw_command_progress` 和轮子差速引导都为 `0`，策略能靠站稳和少量 tracking 奖励维持，不一定会学出明显 yaw 响应。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/scripts/reinforcement_learning/rsl_rl/play.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+Flat-Yaw 环境：
+
+- `ang_vel_z range: (-0.35, 0.35) -> (-0.65, 0.65)`，让训练命令和键盘测试都有更明显的 yaw 目标。
+- `heading range: (-0.35, 0.35) -> (-0.65, 0.65)`，保持配置一致。
+- `command_levels_lin_vel = None`，Flat-Yaw 不训练 x/y 平移，不需要线速度 curriculum。
+- `command_levels_ang_vel = None`，取消 yaw curriculum，避免早期命令被缩得太小，导致 policy 学成“基本站着不转”。
+- `track_lin_vel_xy_exp.weight: 2.0 -> 0.8`，减少“保持 vx/vy 为 0”对 yaw 的压制。
+- `track_ang_vel_z_exp.weight: 1.5 -> 3.0`，让 yaw 速度跟踪成为 Flat-Yaw 的主要目标。
+- `yaw_command_progress.weight: 0 -> 1.0`，加入直接的 yaw 进展奖励。
+- `yaw_command_progress.max_yaw_rate: 0.35 -> 0.65`，与新的 yaw 命令范围一致。
+- `yaw_wheel_differential_progress.weight: 0 -> 0.25`，轻量恢复轮子差速方向引导，先保证 `X/Z` 有转向响应。
+- `yaw_wheel_velocity_alignment.weight: 0 -> 0.10`，轻量约束左右轮速度方向和 yaw 命令一致。
+- `yaw_stuck_with_command.weight: -4.0 -> -6.0`，更明确惩罚有 yaw 命令但 yaw 速度不足。
+- `yaw_stuck_with_command.yaw_velocity_threshold: 0.08 -> 0.06`，低速阶段也能识别卡住。
+- `feet_slide.weight: -0.20 -> -0.15`，暂时降低一点滑动惩罚，避免“为了不滑而不动”；这版先解决“能不能转起来”。
+
+Play 键盘测试：
+
+- `keyboard_yaw_sensitivity: 0.70 * yaw_range -> 1.00 * yaw_range`。
+- 也就是 Flat-Yaw 下按 `Z/X` 会给完整的 `+0.65/-0.65 rad/s`，方便判断策略是否真的响应 yaw 命令。
+
+### 验证结果
+
+- 本地 `py_compile` 已通过：
+  - `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+  - `robot_lab-main/scripts/reinforcement_learning/rsl_rl/play.py`
+- 已上传到云端 `ssh -p 31979 root@183.147.142.40`。
+- 云端 `py_compile` 已通过同两个文件。
+- 云端已确认关键行：
+  - Flat-Yaw `ang_vel_z = (-0.65, 0.65)`
+  - Flat-Yaw `command_levels_ang_vel = None`
+  - Flat-Yaw `yaw_command_progress.weight = 1.0`
+  - Flat-Yaw `yaw_wheel_differential_progress.weight = 0.25`
+  - `play.py` 中 `keyboard_yaw_sensitivity = env_cfg.commands.base_velocity.ranges.ang_vel_z[1]`
+
+### 已知风险
+
+- 这版会更鼓励 yaw 响应，可能重新出现轮子差速/贴地转向，抬腿不一定马上出现。
+- 取消 yaw curriculum 后，早期训练更难一些，但比“命令太弱导致完全没反应”更容易判断问题。
+- 如果后续 `feet_slide` 明显恶化，再把滑动惩罚逐步加回去。
+
+### 下一步观察指标
+
+- `Metrics/base_velocity/error_vel_yaw` 是否明显下降。
+- `Episode_Reward/track_ang_vel_z_exp` 是否明显上升。
+- `Episode_Reward/yaw_command_progress` 是否上升。
+- `Episode_Reward/yaw_wheel_differential_progress` 是否有正向趋势。
+- `Episode_Reward/yaw_stuck_with_command` 是否减轻。
+- 实际 `X/Z` 键盘测试时 `base_wz` 是否从接近 0 变成稳定正/负 yaw。
+
 ## 2026-06-24: stable-flat-yaw-pretrain-v26
 
 状态：修正 v25 Flat-Yaw 一进环境就摔倒的问题。v25 为了让前轮有足够抬升空间，把 Flat-Yaw 的 `hipy/knee` action scale 放到 `0.40rad`，但从零训练时 PPO 初始噪声仍是 `0.8`，随机动作过大，导致 episode 很短、先学不到站稳。v26 先降低动作幅度和探索噪声，让 Flat-Yaw 能站住再学 yaw/gait。没有修改 `jk03.py`、URDF、terrain curriculum。

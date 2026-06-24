@@ -265,33 +265,42 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # A narrow yaw stage for checking the mature baseline: no direct lift
-        # shaping, only yaw tracking/progress, anti-slide, anti-stuck, and joint
-        # regularization.
+        # A focused yaw stage for keyboard X/Z testing: train the full yaw
+        # command range directly, instead of letting curriculum shrink early
+        # yaw commands until the policy learns to mostly stand still.
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.35, 0.35)
-        self.commands.base_velocity.ranges.heading = (-0.35, 0.35)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.65, 0.65)
+        self.commands.base_velocity.ranges.heading = (-0.65, 0.65)
+        self.curriculum.command_levels_lin_vel = None
+        self.curriculum.command_levels_ang_vel = None
 
-        self.rewards.track_lin_vel_xy_exp.weight = 2.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.5
-        self.rewards.yaw_command_progress.weight = 0
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.35
-        self.rewards.yaw_wheel_differential_progress.weight = 0
+        self.rewards.track_lin_vel_xy_exp.weight = 0.8
+        self.rewards.track_ang_vel_z_exp.weight = 3.0
+        self.rewards.yaw_command_progress.weight = 1.0
+        self.rewards.yaw_command_progress.params["command_threshold"] = 0.05
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.65
+        self.rewards.yaw_wheel_differential_progress.weight = 0.25
+        self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
+        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.65
+        self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_wheel_velocity_alignment.weight = 0
+        self.rewards.yaw_wheel_velocity_alignment.weight = 0.10
+        self.rewards.yaw_wheel_velocity_alignment.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_velocity_alignment.params["max_xy_command"] = 1.20
-        self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 5.0
+        self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_velocity_alignment.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_stuck_with_command.weight = -4.0
+        self.rewards.yaw_stuck_with_command.weight = -6.0
+        self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.05
+        self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.actions.joint_pos.scale = {
             ".*_hipx_joint": 0.04,
             ".*_hipy_joint": 0.30,
             ".*_knee_joint": 0.30,
         }
 
-        self.rewards.feet_slide.weight = -0.20
+        self.rewards.feet_slide.weight = -0.15
         self.rewards.feet_slide.params["command_name"] = "base_velocity"
         self.rewards.feet_slide.params["yaw_slide_scale"] = 1.0
         self.rewards.feet_gait.weight = 0.50
