@@ -29,6 +29,112 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: mature-air-time-yaw-baseline-v23
+
+状态：在 v22 mature anti-slide baseline 基础上走查后修正。v22 只靠 `feet_slide` 惩罚和 yaw tracking/yaw progress，理论上可以让策略发现“抬脚能少滑”，但这个信号是间接的、稀疏的，没有正向告诉 policy “离地一步是好事”。成熟 locomotion baseline 里通常会保留轻量 `feet_air_time`，因此本次复用仓库已有 `mdp.feet_air_time`，不新增复杂手写前轮 shaping，不恢复 v15-v21 那套前轮/后轮定制奖励。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+走查 v22 后发现：
+
+- `yaw_turn_feet_clearance`、`yaw_front_lift_height_pretrain`、`yaw_front_lift_tangential_participation` 等复杂抬腿项已经关闭，这是对的。
+- 但同时 `feet_air_time.weight` 仍为 0，导致新策略只看到“滑动会扣分”，看不到“离地一小段时间会加分”。
+- 对 PPO 来说，纯滑动惩罚很容易学成保守动作、轻微转向、站住，或者继续找关节姿态捷径。
+- 成熟代码的做法通常不是直接写“前轮必须怎么摆”，而是用 velocity tracking + regularization + `feet_air_time` 这类通用步态存在感奖励。
+
+### 本地计算/模拟
+
+用 URDF 的前腿简化平面运动学计算了当前动作空间是否足够抬轮：
+
+- 初始姿态：
+  - `hipy = 0.9`
+  - `knee = -1.33`
+- v22 动作尺度：
+  - `hipy/knee = ±0.20 rad`
+  - 理论最大轮心抬升约 `0.0336 m`，即 `3.4 cm`
+- v23 动作尺度：
+  - `hipy/knee = ±0.24 rad`
+  - 理论最大轮心抬升约 `0.0408 m`，即 `4.1 cm`
+
+结论：不是 URDF/机械结构完全抬不起，而是奖励路径不够明确，且 v22 的 `hipy/knee` 动作尺度略保守。
+
+`feet_air_time` 的局部奖励也检查过：
+
+- threshold 设置为 `0.12 s`
+- 普通 Flat 权重 `0.08`
+- Flat-Yaw 权重 `0.20`
+- air time 超过 `0.12 s` 后才给正奖励，低于阈值会轻微扣分，避免极短抖动也拿分。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+普通 `JK03FlatEnvCfg`：
+
+- 放大前后摆腿自由度，但继续限制侧向拧腿：
+  - `hipx` action scale 保持 `0.06`
+  - `hipy/knee` action scale：`0.20 -> 0.24`
+- 降低整体关节姿态惩罚，避免 hipy/knee 抬腿被压死：
+  - `joint_pos_penalty.weight: -0.55 -> -0.40`
+- 保持 hipx 约束不放松，继续抑制左右夸张拧腿：
+  - `joint_deviation_hipx_l1.weight = -0.55`
+  - `yaw_turn_joint_posture_l2.weight = -0.15`
+- 启用仓库已有成熟项 `feet_air_time`：
+  - `feet_air_time.weight = 0.08`
+  - `feet_air_time.params["threshold"] = 0.12`
+  - `feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]`
+
+专用 `JK03FlatYawEnvCfg`：
+
+- 继续使用 v22 的低速原地 yaw baseline。
+- 更集中地鼓励 yaw 时出现有效离地：
+  - `feet_air_time.weight = 0.20`
+  - `feet_air_time.params["threshold"] = 0.12`
+- 同样将：
+  - `joint_pos_penalty.weight: -0.55 -> -0.40`
+
+### 仍然关闭的内容
+
+这些 v15-v21 的复杂项仍然保持关闭：
+
+- `yaw_turn_feet_clearance`
+- `yaw_turn_diagonal_step`
+- `yaw_turn_tangential_swing`
+- `yaw_front_wheel_participation`
+- `yaw_front_lift_height_pretrain`
+- `yaw_front_lift_tangential_participation`
+- `yaw_rear_drag_without_front_penalty`
+- `yaw_wheel_lateral_separation_penalty`
+- `yaw_wheel_differential_progress`
+- `yaw_wheel_velocity_alignment`
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有新增 reward 函数。
+- 没有上传云服务器；本次按要求只提交 GitHub。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 本地运动学计算已确认 v23 动作尺度下前腿轮心理论可抬升约 `4.1 cm`。
+- 已随 v23 代码提交到 GitHub `main`。
+
+### 已知风险
+
+- `feet_air_time` 如果权重过大，可能出现轻微跳动或不必要抬脚；本次只给普通 Flat `0.08`、Flat-Yaw `0.20`，先作为成熟基线的小补丁。
+- 如果视频仍然完全不抬腿，下一步不应该继续堆 front-lift shaping，而应考虑参考 gait/contact schedule 或 imitation/reference action，让 policy 有明确相位。
+- 如果脚开始抬但 yaw 变差，需要看 `track_ang_vel_z_exp`、`yaw_command_progress`、`feet_slide` 三者是否同时改善，而不是只看 air-time。
+
 ## 2026-06-24: mature-antislide-yaw-baseline-v22
 
 状态：大幅回退这一周不断堆叠的抬腿/前轮参与专用 reward，改回更接近 legged_gym / IsaacLab 成熟 locomotion baseline 的写法：用速度跟踪和 yaw 进展定义任务，用 feet slide、关节姿态、动作平滑和 stuck penalty 约束物理行为。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。

@@ -46,8 +46,8 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
 
         self.actions.joint_pos.scale = {
             ".*_hipx_joint": 0.06,
-            ".*_hipy_joint": 0.20,
-            ".*_knee_joint": 0.20,
+            ".*_hipy_joint": 0.24,
+            ".*_knee_joint": 0.24,
         }
         self.actions.joint_pos.clip = {".*": (-1.0, 1.0)}
         self.actions.joint_vel.scale = 8.0
@@ -99,7 +99,7 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.yaw_hipx_twist_without_yaw_progress.params["yaw_velocity_threshold"] = 0.15
         self.rewards.yaw_hipx_twist_without_yaw_progress.params["asset_cfg"].joint_names = ".*_hipx_joint"
         self.rewards.joint_deviation_hipx_l1.weight = -0.55
-        self.rewards.joint_pos_penalty.weight = -0.55
+        self.rewards.joint_pos_penalty.weight = -0.40
         self.rewards.action_rate_l2.weight = -0.01
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.feet_stumble.weight = 0
@@ -108,6 +108,9 @@ class JK03FlatEnvCfg(JK03RoughEnvCfg):
         self.rewards.feet_slide.params["yaw_command_threshold"] = 0.06
         self.rewards.feet_slide.params["max_xy_command"] = 0.12
         self.rewards.feet_slide.params["yaw_slide_scale"] = 1.0
+        self.rewards.feet_air_time.weight = 0.08
+        self.rewards.feet_air_time.params["threshold"] = 0.12
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height_body.weight = 0
         self.rewards.stuck_with_command.weight = -4.0
         self.rewards.stuck_with_command.params["command_threshold"] = 0.08
@@ -303,8 +306,11 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.yaw_hipx_twist_without_yaw_progress.weight = 0
         self.rewards.yaw_hipx_twist_without_yaw_progress.params["asset_cfg"].joint_names = ".*_hipx_joint"
         self.rewards.joint_deviation_hipx_l1.weight = -0.55
-        self.rewards.joint_pos_penalty.weight = -0.55
+        self.rewards.joint_pos_penalty.weight = -0.40
         self.rewards.yaw_turn_joint_posture_l2.weight = -0.15
+        self.rewards.feet_air_time.weight = 0.20
+        self.rewards.feet_air_time.params["threshold"] = 0.12
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         if self.__class__.__name__ == "JK03FlatYawEnvCfg":
             self.disable_zero_weight_rewards()
