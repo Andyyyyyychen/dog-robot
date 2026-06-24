@@ -287,8 +287,8 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.yaw_stuck_with_command.weight = -4.0
         self.actions.joint_pos.scale = {
             ".*_hipx_joint": 0.04,
-            ".*_hipy_joint": 0.40,
-            ".*_knee_joint": 0.40,
+            ".*_hipy_joint": 0.30,
+            ".*_knee_joint": 0.30,
         }
 
         self.rewards.feet_slide.weight = -0.20
@@ -315,8 +315,8 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.joint_deviation_hipx_l1.weight = -0.55
         self.rewards.joint_pos_penalty.weight = -0.40
         self.rewards.yaw_turn_joint_posture_l2.weight = -0.15
-        self.rewards.feet_air_time.weight = 0.45
-        self.rewards.feet_air_time.params["threshold"] = 0.20
+        self.rewards.feet_air_time.weight = 0.30
+        self.rewards.feet_air_time.params["threshold"] = 0.16
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         if self.__class__.__name__ == "JK03FlatYawEnvCfg":

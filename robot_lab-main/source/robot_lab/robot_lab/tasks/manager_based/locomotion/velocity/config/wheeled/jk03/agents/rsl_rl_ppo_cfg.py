@@ -54,3 +54,5 @@ class JK03FlatYawPPORunnerCfg(JK03FlatPPORunnerCfg):
 
         self.max_iterations = 3000
         self.experiment_name = "jk03_flat_yaw"
+        self.policy.init_noise_std = 0.35
+        self.algorithm.entropy_coef = 0.003

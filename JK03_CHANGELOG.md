@@ -29,6 +29,52 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: stable-flat-yaw-pretrain-v26
+
+状态：修正 v25 Flat-Yaw 一进环境就摔倒的问题。v25 为了让前轮有足够抬升空间，把 Flat-Yaw 的 `hipy/knee` action scale 放到 `0.40rad`，但从零训练时 PPO 初始噪声仍是 `0.8`，随机动作过大，导致 episode 很短、先学不到站稳。v26 先降低动作幅度和探索噪声，让 Flat-Yaw 能站住再学 yaw/gait。没有修改 `jk03.py`、URDF、terrain curriculum。
+
+### 为什么修改
+
+用户测试发现 Flat-Yaw “一进去狗就倒下”。监测数据也支持这个判断：
+
+- `mean_episode_length` 只有约 `27-33` 步。
+- `mean_reward` 虽然改善，但仍处在短 episode 的早期恢复阶段。
+- `feet_air_time` 仍为负，说明还没进入有效步态学习。
+
+原因判断：
+
+- Flat-Yaw 是从零训练，不是从稳定站立 checkpoint resume。
+- v25 的 `hipy/knee scale = 0.40` 理论能抬轮约 `7cm`，但对随机初始策略过大。
+- 继承的 `init_noise_std = 0.8` 会让初始 action 经常接近大幅关节目标，容易直接摔倒。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+Flat-Yaw 环境：
+
+- `hipy action scale: 0.40 -> 0.30`
+- `knee action scale: 0.40 -> 0.30`
+- `hipx action scale` 保持 `0.04`
+- `feet_air_time.weight: 0.45 -> 0.30`
+- `feet_air_time.threshold: 0.20 -> 0.16`
+
+Flat-Yaw PPO：
+
+- `policy.init_noise_std: 0.8 -> 0.35`
+- `algorithm.entropy_coef: 0.006 -> 0.003`
+
+### 预期变化
+
+- 早期不应该再一进环境就大量摔倒。
+- `mean_episode_length` 应该明显高于 v25 的二三十步。
+- 前几百步先看站稳和 yaw tracking，不要急着要求明显抬腿。
+- 如果站稳后 `feet_air_time` 仍长期为负，再考虑逐步提高 air-time 或引入更明确的 contact schedule。
+
 ## 2026-06-24: unitree-scaled-urdf-gait-yaw-v25
 
 状态：按 Unitree/legged_gym 和仓库内成熟四足配置重新标定 v24 的 gait/air-time/yaw 权重，并按 JK03 URDF 几何重新设置 Flat-Yaw 的腿部动作幅度。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构，也没有新增 reward 函数。
