@@ -29,6 +29,108 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: dense-front-lift-pretrain-v20
+
+状态：根据最新反馈“Flat-Yaw 最新版本 1600 step 仍然不能抬腿转向”，本次不再继续单纯加大 `feet_slide` 惩罚，而是新增一个低门槛、密集触发的前轮高度预训练奖励 `yaw_front_lift_height_pretrain`。目标是先让 policy 在 yaw 命令下学会把前轮/前脚往上收，再由已有的 `yaw_front_lift_tangential_participation` 和 `yaw_turn_tangential_swing` 继续塑造成切向摆动。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。
+
+### 为什么修改
+
+v19 的核心奖励 `yaw_front_lift_tangential_participation` 是乘法结构：
+
+- 前轮高度要起来。
+- 前轮要有 air time。
+- 前轮还要沿 yaw 切向摆动。
+
+如果训练早期前轮始终贴地，`air_score` 或切向速度分数接近 0，整个 reward 就接近 0。这样 PPO 收不到“先抬起来”的早期梯度，只会继续选择轮子贴地滚/滑、后轮拖动、hipx 拧腿这些便宜解。直接大幅提高滑动惩罚又容易让策略不动，所以本次把目标拆成第一阶段：
+
+```text
+只要 yaw 命令下前轮相对机身高度变高，先给正奖励。
+```
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增 reward 函数：
+
+- `yaw_front_lift_height_pretrain`
+  - 只在 `abs(yaw_command) > command_threshold` 且 `xy command <= max_xy_command` 时生效。
+  - 读取 `fl_wheel`、`fr_wheel` 相对 base frame 的 z 高度。
+  - 使用 `(front_z - min_height) / (target_height - min_height)` 转成 0 到 1 的高度分数。
+  - 不要求 `current_air_time`，不要求前轮已经完全离地。
+  - 不要求切向速度，避免早期因为还不会摆动导致 reward 全 0。
+  - 奖励由 `0.65 * 单侧前轮最高抬起分 + 0.35 * 双前轮平均抬起分` 组成：
+    - 单侧项用于让任意一只前轮开始动起来。
+    - 平均项用于后续鼓励左右前轮都变成可用动作，而不是永远只动一边。
+  - 仍乘以 `_upright_scale(env)`，避免倒地/严重倾斜时骗取抬腿分。
+
+注册 reward term：
+
+- 在 `JK03RewardsCfg` 中加入 `yaw_front_lift_height_pretrain`。
+- 默认 `weight = 0.0`，只在 JK03 Flat/Flat-Yaw 显式开启。
+- 默认参数：
+  - `command_threshold = 0.08`
+  - `max_xy_command = 0.12`
+  - `min_height = -0.35`
+  - `target_height = -0.30`
+  - `front_body_names = ("fl_wheel", "fr_wheel")`
+
+Flat 配置调整：
+
+- `yaw_front_lift_height_pretrain.weight = 0.45`
+- `min_height = -0.35`
+- `target_height = -0.30`
+
+Flat-Yaw 配置调整：
+
+- `yaw_front_lift_height_pretrain.weight = 1.20`
+- `target_height = -0.305`
+
+Flat-Yaw 给得更强、目标稍低，是因为它是专用 yaw 抬腿预训练任务；`target_height=-0.305` 表示早期只要出现较小但真实的前轮上收，就能先拿到明显奖励。
+
+### 没有修改什么
+
+- 没有修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 没有修改 JK03 URDF。
+- 没有修改 terrain curriculum。
+- 没有修改 fan-ziqi terrain level 算法。
+- 没有打开 `yaw_turn_air_time_deficit` 和 `yaw_turn_phase_timeout`。
+- 没有暴力加大 `feet_slide`，避免再次把策略压成不动。
+
+### 验证结果
+
+- 本地 `python3 -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+- 云端已上传到 `/root/jk03_v20_dense_front_lift_pretrain_patch.tar.gz` 并解压到 `/root/dog-robot-main`。
+- 云端 `conda activate isaaclab` 后 `python -m py_compile` 已通过：
+  - `rewards.py`
+  - `rough_env_cfg.py`
+  - `flat_env_cfg.py`
+
+### 已知风险
+
+- 早期可能出现“前轮开始抬，但 yaw 还不顺”的阶段，这是预期的中间状态。
+- 如果权重过高，可能出现前轮频繁上收但身体 yaw progress 不足，需要继续提高 yaw progress 或降低该预训练项。
+- 如果只抬一边前轮，需要后续再加左右对称/交替逻辑，但不应在这一轮过早加硬相位惩罚。
+
+### 下一步观察指标
+
+- `yaw_front_lift_height_pretrain`：第一优先级，应该明显高于 0，并在 200-step 窗口均值上升。
+- `yaw_front_lift_tangential_participation`：应该随后从 `0.0000x` 向更高量级走。
+- `yaw_turn_feet_clearance`
+- `yaw_turn_tangential_swing`
+- `yaw_command_progress`
+- `track_ang_vel_z_exp`
+- `feet_slide`
+- `yaw_rear_drag_without_front_penalty`
+
 ## 2026-06-23: flat-yaw-lift-pretrain-v19
 
 状态：在 v18 普通 Flat 继续训练的基础上，新增一版更适合并行实验的专用 `Flat-Yaw` 配置。只修改 `JK03FlatYawEnvCfg` 的命令范围和 reward 权重，不影响普通 `JK03FlatEnvCfg` 当前训练。没有修改 `jk03.py`、URDF、terrain curriculum、PPO 结构。

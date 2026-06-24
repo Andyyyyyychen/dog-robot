@@ -364,6 +364,20 @@ class JK03RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_front_lift_height_pretrain = RewTerm(
+        func=mdp.yaw_front_lift_height_pretrain,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.12,
+            "min_height": -0.35,
+            "target_height": -0.30,
+            "front_body_names": ("fl_wheel", "fr_wheel"),
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
     yaw_front_lift_tangential_participation = RewTerm(
         func=mdp.yaw_front_lift_tangential_participation,
         weight=0.0,

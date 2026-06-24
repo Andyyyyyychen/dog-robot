@@ -1009,6 +1009,38 @@ def yaw_front_wheel_participation(
     return reward
 
 
+def yaw_front_lift_height_pretrain(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    command_threshold: float,
+    max_xy_command: float,
+    min_height: float,
+    target_height: float,
+    front_body_names: tuple[str, str],
+) -> torch.Tensor:
+    """Reward front wheels moving upward during in-place yaw turns before full air-time emerges."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_command = command[:, 2]
+    active_command = torch.logical_and(torch.abs(yaw_command) > command_threshold, command_xy_norm <= max_xy_command)
+
+    front_body_ids = list(asset.find_bodies(front_body_names)[0])
+    front_pos_b, _ = _body_frame_relative_states(env, asset, front_body_ids)
+    height_span = max(target_height - min_height, 1.0e-6)
+    lift_score = torch.clamp((front_pos_b[:, :, 2] - min_height) / height_span, min=0.0, max=1.0)
+
+    # Give an early signal when either front wheel starts lifting, while still
+    # preferring both front wheels to become usable over time.
+    single_front_lift = torch.max(lift_score, dim=1).values
+    both_front_lift = torch.mean(lift_score, dim=1)
+    reward = 0.65 * single_front_lift + 0.35 * both_front_lift
+    reward *= active_command.float()
+    reward *= _upright_scale(env)
+    return reward
+
+
 def yaw_front_lift_tangential_participation(
     env: ManagerBasedRLEnv,
     command_name: str,
