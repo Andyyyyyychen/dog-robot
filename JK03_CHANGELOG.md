@@ -29,6 +29,116 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-24: flat-yaw-low-speed-lift-step-v31
+
+状态：根据 v30 诊断结果做 Flat-Yaw 小步参数调整，不新增 reward 函数，不恢复实验性函数。目标是让 PPO 先在低速 yaw 下学“小幅抬轮/换步”，而不是继续选择前轮贴地当支点、后轮贴地滑动的 pivot turn。
+
+### 为什么修改
+
+v30 诊断脚本已经确认：
+
+- 开环 hipy/knee 动作可以让 JK03 wheel body 离地。
+- `contact_forces` 可以正确记录 `air_time`。
+- 因此当前“不抬腿”不是 URDF、action 通道或 contact sensor 的硬故障。
+
+当前训练问题更像是 reward 比例导致的策略选择：
+
+- yaw tracking / yaw progress / 轮差速项仍然让贴地 pivot turn 可以较快拿分。
+- 抬腿会带来姿态不稳、done、action/joint penalty 的风险。
+- PPO 选择了更容易的贴地滑动，而不是更难的抬轮换步。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+仅修改 `JK03FlatYawEnvCfg` 和 `JK03FlatYawPPORunnerCfg`：
+
+- `ang_vel_z: (-0.65, 0.65) -> (-0.45, 0.45)`
+  - 先训练低速原地 yaw，降低快速贴地 pivot 的吸引力。
+- `heading: (-0.65, 0.65) -> (-0.45, 0.45)`
+  - 与 yaw 速度范围一致。
+- `track_ang_vel_z_exp.weight: 2.6 -> 2.1`
+  - 降低“只要身体 yaw 转起来就行”的压力。
+- `yaw_command_progress.weight: 0.85 -> 0.60`
+  - 继续保留 yaw 进展，但不让它压过抬轮/步态项。
+- `yaw_command_progress.max_yaw_rate: 0.65 -> 0.45`
+  - 匹配低速 yaw 阶段。
+- `yaw_wheel_differential_progress.weight: 0.08 -> 0.03`
+  - 进一步削弱轮差速贴地捷径。
+- `yaw_wheel_differential_progress.max_yaw_rate: 0.65 -> 0.45`
+  - 匹配低速 yaw 阶段。
+- `yaw_wheel_velocity_alignment.weight: 0.03 -> 0.01`
+  - 只保留极轻方向提示，不再鼓励靠轮差速硬转。
+- `yaw_stuck_with_command.weight: -6.0 -> -4.0`
+  - 降低“不动就重罚”的压力，避免 policy 为了逃 stuck 继续贴地滑。
+- `actions.joint_pos.scale[".*_hipx_joint"]: 0.04 -> 0.035`
+  - 继续压住 hipx 拧腿。
+- `actions.joint_pos.scale[".*_hipy_joint"] = 0.30`、`knee = 0.30`
+  - 保持 v30 诊断确认有效的抬轮动作空间。
+- `feet_slide.weight: -0.28 -> -0.24`
+  - 滑动惩罚保持存在，但避免过强后直接学不动。
+- `feet_slide.yaw_slide_scale: 1.5 -> 1.3`
+  - 同上，保留 yaw 贴地滑动惩罚但不过硬。
+- `feet_gait.weight: 0.65 -> 0.55`
+  - 降低对严格 gait 的压力。
+- `feet_gait.std: 0.50 -> 0.55`
+  - 放宽接触时序匹配。
+- `feet_gait.max_err: 0.30 -> 0.35`
+  - 允许早期步态不标准，避免一动就扣太多。
+- `joint_deviation_hipx_l1.weight: -0.55 -> -0.60`
+  - 略加强防 hipx 拧腿。
+- `joint_pos_penalty.weight: -0.32 -> -0.24`
+  - 放松 hipy/knee 抬轮时的整体关节姿态成本。
+- `yaw_turn_joint_posture_l2.weight: -0.15 -> -0.20`
+  - yaw 时继续压 hipx 拧腿。
+- `feet_air_time.weight: 0.45 -> 0.55`
+  - 提高离地/落地事件的重要性。
+- `feet_air_time.threshold: 0.18 -> 0.12`
+  - 让早期小幅抬轮也更容易获得正反馈，不强迫长时间腾空。
+- `JK03FlatYawPPORunnerCfg.policy.init_noise_std: 0.35 -> 0.28`
+  - 降低开局大幅随机动作和摔倒风险。
+- `JK03FlatYawPPORunnerCfg.algorithm.entropy_coef: 0.003 -> 0.002`
+  - 让探索更稳，不靠乱跳找动作。
+
+### 没有修改什么
+
+- 没改 `rewards.py`。
+- 没新增 reward 函数。
+- 没改 `jk03.py`。
+- 没改 URDF。
+- 没改 terrain curriculum。
+- 没改普通 `Flat` / `Rough` 的主体逻辑。
+
+### 验证结果
+
+- 本地执行：
+  - `python3 -m py_compile robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+  - 通过。
+- 云端上传：
+  - 已同步到 `/root/dog-robot-main/robot_lab-main`。
+- 云端执行：
+  - `python -m py_compile source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+  - 通过。
+
+### 预期现象
+
+- 早期 yaw 可能比 v29 慢。
+- 如果方向正确，`feet_air_time` 应该从负值逐步接近 0 或转正。
+- `feet_slide` 不一定立刻大幅改善，但不应继续恶化。
+- `yaw_wheel_differential_progress` 可能下降，这是预期，因为这版不鼓励贴地轮差速捷径。
+
+### 下一步观察指标
+
+- `feet_air_time` 是否从 `-0.02~-0.03` 逐步接近 0。
+- `feet_gait` 是否稳定，不要大幅震荡。
+- `feet_slide` 是否不继续恶化。
+- `yaw error` 是否没有完全崩掉。
+- 视频中是否从“前轮支点 + 后轮拖滑”变成“小幅抬轮/换支撑”。
+
 ## 2026-06-24: lift-contact-diagnostic-action-layout-fix-v30.2
 
 状态：继续修复 v30 诊断脚本。云端输出显示真实 `robot_joint_names` 顺序不是“每条腿 3 个关节连续排列”，而是：

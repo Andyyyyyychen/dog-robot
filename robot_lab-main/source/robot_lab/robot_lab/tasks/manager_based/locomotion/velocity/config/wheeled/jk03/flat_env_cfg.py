@@ -161,52 +161,51 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # A focused yaw stage for keyboard X/Z testing: train the full yaw
-        # command range directly, instead of letting curriculum shrink early
-        # yaw commands until the policy learns to mostly stand still.
+        # A focused yaw stage for keyboard X/Z testing.  Keep the first yaw
+        # stage slow enough that stepping can beat the easy grounded pivot turn.
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.65, 0.65)
-        self.commands.base_velocity.ranges.heading = (-0.65, 0.65)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.45, 0.45)
+        self.commands.base_velocity.ranges.heading = (-0.45, 0.45)
         self.curriculum.command_levels_lin_vel = None
         self.curriculum.command_levels_ang_vel = None
 
         self.rewards.track_lin_vel_xy_exp.weight = 0.8
-        self.rewards.track_ang_vel_z_exp.weight = 2.6
-        self.rewards.yaw_command_progress.weight = 0.85
+        self.rewards.track_ang_vel_z_exp.weight = 2.1
+        self.rewards.yaw_command_progress.weight = 0.60
         self.rewards.yaw_command_progress.params["command_threshold"] = 0.05
-        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.65
-        self.rewards.yaw_wheel_differential_progress.weight = 0.08
+        self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.45
+        self.rewards.yaw_wheel_differential_progress.weight = 0.03
         self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
-        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.65
+        self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.45
         self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_wheel_velocity_alignment.weight = 0.03
+        self.rewards.yaw_wheel_velocity_alignment.weight = 0.01
         self.rewards.yaw_wheel_velocity_alignment.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_velocity_alignment.params["max_xy_command"] = 1.20
         self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_velocity_alignment.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_stuck_with_command.weight = -6.0
+        self.rewards.yaw_stuck_with_command.weight = -4.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.05
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.actions.joint_pos.scale = {
-            ".*_hipx_joint": 0.04,
+            ".*_hipx_joint": 0.035,
             ".*_hipy_joint": 0.30,
             ".*_knee_joint": 0.30,
         }
 
-        self.rewards.feet_slide.weight = -0.28
+        self.rewards.feet_slide.weight = -0.24
         self.rewards.feet_slide.params["command_name"] = "base_velocity"
-        self.rewards.feet_slide.params["yaw_slide_scale"] = 1.5
-        self.rewards.feet_gait.weight = 0.65
-        self.rewards.feet_gait.params["std"] = 0.50
-        self.rewards.feet_gait.params["max_err"] = 0.30
-        self.rewards.joint_deviation_hipx_l1.weight = -0.55
-        self.rewards.joint_pos_penalty.weight = -0.32
-        self.rewards.yaw_turn_joint_posture_l2.weight = -0.15
-        self.rewards.feet_air_time.weight = 0.45
-        self.rewards.feet_air_time.params["threshold"] = 0.18
+        self.rewards.feet_slide.params["yaw_slide_scale"] = 1.3
+        self.rewards.feet_gait.weight = 0.55
+        self.rewards.feet_gait.params["std"] = 0.55
+        self.rewards.feet_gait.params["max_err"] = 0.35
+        self.rewards.joint_deviation_hipx_l1.weight = -0.60
+        self.rewards.joint_pos_penalty.weight = -0.24
+        self.rewards.yaw_turn_joint_posture_l2.weight = -0.20
+        self.rewards.feet_air_time.weight = 0.55
+        self.rewards.feet_air_time.params["threshold"] = 0.12
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         if self.__class__.__name__ == "JK03FlatYawEnvCfg":
