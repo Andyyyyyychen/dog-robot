@@ -541,6 +541,20 @@ class RewardsCfg:
         },
     )
 
+    yaw_feet_air_time_positive = RewTerm(
+        func=mdp.yaw_feet_air_time_positive,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "threshold": 0.12,
+            "command_threshold": 0.05,
+            "max_xy_command": 0.12,
+            "min_contact_feet": 2,
+            "max_air_feet": 2,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+        },
+    )
+
     feet_air_time_variance = RewTerm(
         func=mdp.feet_air_time_variance_penalty,
         weight=0,

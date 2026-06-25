@@ -207,6 +207,13 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
         self.rewards.feet_air_time.weight = 0.55
         self.rewards.feet_air_time.params["threshold"] = 0.12
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.yaw_feet_air_time_positive.weight = 0.35
+        self.rewards.yaw_feet_air_time_positive.params["threshold"] = 0.12
+        self.rewards.yaw_feet_air_time_positive.params["command_threshold"] = 0.05
+        self.rewards.yaw_feet_air_time_positive.params["max_xy_command"] = 0.12
+        self.rewards.yaw_feet_air_time_positive.params["min_contact_feet"] = 2
+        self.rewards.yaw_feet_air_time_positive.params["max_air_feet"] = 2
+        self.rewards.yaw_feet_air_time_positive.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         if self.__class__.__name__ == "JK03FlatYawEnvCfg":
             self.disable_zero_weight_rewards()

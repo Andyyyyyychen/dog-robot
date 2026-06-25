@@ -29,6 +29,76 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-25: flat-yaw-positive-air-time-v32
+
+状态：根据 v31 约 1500 step 的窗口均值反馈，新增 1 个 reward 函数，不恢复多轮实验性前轮参与/防叠轮/切向摆动函数。目标是补上原 `feet_air_time` 只在落地瞬间给信号的问题，让 Flat-Yaw 在 yaw 命令下“离地期间”也能拿到连续奖励。
+
+### 为什么修改
+
+v31 当前 run 到约 `1579 step`：
+
+- `mean_reward` 连续改善，`yaw error` 下降，说明低速 yaw 训练没有崩。
+- `feet_gait` 上升，说明接触节奏在变化。
+- 但 `feet_air_time` 从 `800-1000` 窗口的约 `-0.0079` 继续恶化到 `1400-1600` 窗口的约 `-0.0168`。
+- `feet_slide` 只是小幅改善，仍说明策略主要在贴地转/滑动转。
+
+这说明现有 mature-style `feet_air_time` 对 JK03 yaw 抬轮早期不够直接：它主要在 first-contact 落地时结算，如果 policy 长期贴地，学习信号很稀。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/velocity_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+新增 1 个函数：
+
+- `yaw_feet_air_time_positive`
+  - 只在接近原地 yaw 命令时生效。
+  - 使用 `current_air_time`，而不是只等 `first_contact`。
+  - 要求至少 `min_contact_feet=2` 个轮/脚还在支撑。
+  - 要求空中轮/脚数量 `1-2` 个，避免奖励四轮一起跳。
+  - 输出裁剪到 `0-1`，作为温和连续引导。
+
+Flat-Yaw 中打开该项：
+
+- `yaw_feet_air_time_positive.weight = 0.35`
+- `threshold = 0.12`
+- `command_threshold = 0.05`
+- `max_xy_command = 0.12`
+- `min_contact_feet = 2`
+- `max_air_feet = 2`
+
+保留 v31 的主线设置：
+
+- 不新增前轮专用参与函数。
+- 不新增后轮专用拖动函数。
+- 不恢复防叠轮/外趴/切向摆动等实验性函数。
+- 继续保留 `track_ang_vel_z_exp`、`yaw_command_progress`、轻量轮差速辅助、`feet_air_time`、`feet_gait`、`feet_slide`。
+
+### 没有修改什么
+
+- 未修改 `jk03.py`。
+- 未修改 JK03 URDF。
+- 未修改 terrain curriculum 算法。
+- 未修改 rough 任务主线。
+
+### 已知风险
+
+- 该项可能让策略先学会“抬住某个轮/脚”而不是完整换步，需要看实际视频确认。
+- 如果 `feet_slide` 仍不下降，说明它可能仍用少量离地配合贴地拖滑刷分。
+- 如果 `yaw error` 明显变差，说明抬轮奖励压过了 yaw tracking，需要下调权重。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_feet_air_time_positive` 是否从 0 上升。
+- `Episode_Reward/feet_air_time` 是否从负值向 0 或转正。
+- `Episode_Reward/feet_slide` 是否下降或至少不继续恶化。
+- `Metrics/base_velocity/error_vel_yaw` 是否不崩。
+- 实测 X/Z 是否从纯贴地 pivot 变成至少有 1-2 个轮/脚短暂离地。
+
 ## 2026-06-24: flat-yaw-low-speed-lift-step-v31
 
 状态：根据 v30 诊断结果做 Flat-Yaw 小步参数调整，不新增 reward 函数，不恢复实验性函数。目标是让 PPO 先在低速 yaw 下学“小幅抬轮/换步”，而不是继续选择前轮贴地当支点、后轮贴地滑动的 pivot turn。

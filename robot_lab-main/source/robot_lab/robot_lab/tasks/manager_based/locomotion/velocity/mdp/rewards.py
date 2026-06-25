@@ -870,6 +870,41 @@ def feet_air_time(
     return reward
 
 
+def yaw_feet_air_time_positive(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float,
+    command_threshold: float,
+    max_xy_command: float,
+    min_contact_feet: int,
+    max_air_feet: int,
+) -> torch.Tensor:
+    """Reward short, supported wheel/foot air time during near-in-place yaw commands."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    yaw_active = torch.logical_and(
+        torch.abs(command[:, 2]) > command_threshold,
+        torch.linalg.norm(command[:, :2], dim=1) <= max_xy_command,
+    )
+
+    air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    in_air = air_time > 0.0
+    in_contact = contact_time > 0.0
+    air_count = torch.sum(in_air.int(), dim=1)
+    contact_count = torch.sum(in_contact.int(), dim=1)
+
+    supported_step = torch.logical_and(contact_count >= min_contact_feet, air_count <= max_air_feet)
+    supported_step = torch.logical_and(supported_step, air_count > 0)
+    reward = torch.sum(torch.clamp(air_time, max=threshold) * in_air.float(), dim=1)
+    reward = reward / max(threshold * max(max_air_feet, 1), 1.0e-6)
+    reward = torch.clamp(reward, min=0.0, max=1.0)
+    reward *= torch.logical_and(yaw_active, supported_step).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 def feet_air_time_positive_biped(env, command_name: str, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Reward long steps taken by the feet for bipeds.
 
