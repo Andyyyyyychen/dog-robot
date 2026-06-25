@@ -29,6 +29,63 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-25: flat-yaw-remove-dead-terms-v35
+
+状态：严格按公式走查 Flat-Yaw 后做无行为风险清理，不新增 reward 函数。目标是把 Flat-Yaw 下永远不生效或只适用于直线/XY 命令的项显式关掉，避免 TensorBoard 和 reward manager 继续混淆。
+
+### 为什么修改
+
+Flat-Yaw 中：
+
+- `lin_vel_x = 0`
+- `lin_vel_y = 0`
+- 只有 `ang_vel_z` 命令
+
+因此一些从普通 Flat 继承下来的 reward 虽然权重非零，但公式触发条件永远不成立：
+
+- `commanded_base_height_below_target`
+  - 在普通 Flat 中被设为 `straight_command_only=True`，要求 `command_xy_norm > threshold` 且 yaw 很小。
+  - Flat-Yaw 的 `command_xy_norm` 恒为 0，所以永远不触发。
+- `commanded_joint_posture_l2`
+  - 同样是直线命令限定，Flat-Yaw 下永远不触发。
+- `front_joint_posture_l2`
+  - 同样是直线命令限定，Flat-Yaw 下永远不触发。
+- `stuck_with_command`
+  - 只检查 xy command 是否大于阈值，Flat-Yaw 下 xy command 恒为 0，所以永远不触发。
+
+这些项不影响训练结果，但保留非零权重会让配置看起来比实际复杂。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+仅在 `JK03FlatYawEnvCfg` 中显式关闭：
+
+- `commanded_base_height_below_target.weight = 0`
+- `commanded_joint_posture_l2.weight = 0`
+- `front_joint_posture_l2.weight = 0`
+- `stuck_with_command.weight = 0`
+
+### 没有修改什么
+
+- 未新增 reward 函数。
+- 未改动核心项：`track_ang_vel_z_exp`、`feet_air_time`、`yaw_feet_air_time_positive`、`feet_gait`、`feet_slide`。
+- 未修改 `jk03.py`。
+- 未修改 JK03 URDF。
+- 未修改 terrain curriculum 算法。
+- 未修改 rough 任务主线。
+
+### 严格计算结论
+
+- 当前真正决定抬腿的主要项是 `yaw_feet_air_time_positive`，最大加权贡献 `0.75`。
+- 原始 `feet_air_time` 在短离地阶段贡献很小，例如 2 个轮/脚离地 `0.12s` 后落地，加权奖励只有约 `0.028`。
+- yaw tracking 的最大加权贡献约 `2.1`，`yaw_command_progress` 最大约 `0.3`。
+- yaw 时 `feet_slide` 惩罚约为 `-0.45 * 接触轮/脚相对机身水平速度和`，如果贴地滑动速度不大，它仍可能不足以压过 yaw tracking。
+- `feet_gait` 是接触节奏项，不是抬腿项；全脚接地时仍可能有非零分，因此不能单独指望它解决抬腿。
+
 ## 2026-06-25: flat-yaw-clean-mature-baseline-v34
 
 状态：对照 repo 内成熟配置做一次清理，不新增 reward 函数，停掉轮差速捷径项，降低额外 yaw 压力。目标是让 JK03 Flat-Yaw 更接近成熟 legged-gym/Unitree 风格的核心结构：`track_ang_vel_z_exp + feet_air_time + feet_gait + feet_slide`，只保留 1 个 JK03 专用短离地连续奖励。

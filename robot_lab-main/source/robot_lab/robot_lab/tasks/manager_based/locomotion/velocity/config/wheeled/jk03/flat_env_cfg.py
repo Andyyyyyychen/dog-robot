@@ -195,6 +195,10 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
             ".*_knee_joint": 0.30,
         }
 
+        self.rewards.commanded_base_height_below_target.weight = 0
+        self.rewards.commanded_joint_posture_l2.weight = 0
+        self.rewards.front_joint_posture_l2.weight = 0
+        self.rewards.stuck_with_command.weight = 0
         self.rewards.feet_slide.weight = -0.30
         self.rewards.feet_slide.params["command_name"] = "base_velocity"
         self.rewards.feet_slide.params["yaw_slide_scale"] = 1.5
