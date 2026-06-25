@@ -172,21 +172,21 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
 
         self.rewards.track_lin_vel_xy_exp.weight = 0.8
         self.rewards.track_ang_vel_z_exp.weight = 2.1
-        self.rewards.yaw_command_progress.weight = 0.60
+        self.rewards.yaw_command_progress.weight = 0.30
         self.rewards.yaw_command_progress.params["command_threshold"] = 0.05
         self.rewards.yaw_command_progress.params["max_yaw_rate"] = 0.45
-        self.rewards.yaw_wheel_differential_progress.weight = 0.03
+        self.rewards.yaw_wheel_differential_progress.weight = 0
         self.rewards.yaw_wheel_differential_progress.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_differential_progress.params["max_xy_command"] = 1.20
         self.rewards.yaw_wheel_differential_progress.params["max_yaw_rate"] = 0.45
         self.rewards.yaw_wheel_differential_progress.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_differential_progress.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_wheel_velocity_alignment.weight = 0.01
+        self.rewards.yaw_wheel_velocity_alignment.weight = 0
         self.rewards.yaw_wheel_velocity_alignment.params["command_threshold"] = 0.05
         self.rewards.yaw_wheel_velocity_alignment.params["max_xy_command"] = 1.20
         self.rewards.yaw_wheel_velocity_alignment.params["target_wheel_diff"] = 4.0
         self.rewards.yaw_wheel_velocity_alignment.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.yaw_stuck_with_command.weight = -4.0
+        self.rewards.yaw_stuck_with_command.weight = -2.0
         self.rewards.yaw_stuck_with_command.params["command_threshold"] = 0.05
         self.rewards.yaw_stuck_with_command.params["yaw_velocity_threshold"] = 0.06
         self.actions.joint_pos.scale = {

@@ -29,6 +29,79 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-25: flat-yaw-clean-mature-baseline-v34
+
+状态：对照 repo 内成熟配置做一次清理，不新增 reward 函数，停掉轮差速捷径项，降低额外 yaw 压力。目标是让 JK03 Flat-Yaw 更接近成熟 legged-gym/Unitree 风格的核心结构：`track_ang_vel_z_exp + feet_air_time + feet_gait + feet_slide`，只保留 1 个 JK03 专用短离地连续奖励。
+
+### 为什么修改
+
+对照项：
+
+- `unitree_go2` 使用 `track_ang_vel_z_exp`、低权重 `feet_air_time`、`feet_gait`、`feet_slide`，没有额外的 yaw 轮差速奖励。
+- `unitree_b2w`、`ddtrobot_tita` 这类轮腿 baseline 对 `feet_air_time` / `feet_gait` 很保守，通常不强迫抬腿。
+- JK03 当前目标比较特殊：不是普通轮式 yaw，而是希望轮腿 yaw 时开始离地换步。
+
+v32/v33 已经能看到一点 `yaw_feet_air_time_positive`，但实际仍可能前轮支点、后轮拖滑。问题是 Flat-Yaw 里还残留两个轮差速奖励：
+
+- `yaw_wheel_differential_progress`
+- `yaw_wheel_velocity_alignment`
+
+它们会显式鼓励左右轮速度差，容易让 policy 继续走贴地 pivot / 轮差速捷径。它们对“能转起来”有帮助，但和“抬腿转向”目标冲突。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/agents/rsl_rl_ppo_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+仅修改 Flat-Yaw 参数：
+
+- `yaw_command_progress.weight: 0.60 -> 0.30`
+  - 保留轻量 yaw 方向提示，但不让它压过抬腿/防滑信号。
+- `yaw_wheel_differential_progress.weight: 0.03 -> 0`
+  - 停掉直接奖励轮差速的捷径。
+- `yaw_wheel_velocity_alignment.weight: 0.01 -> 0`
+  - 停掉直接奖励左右轮速度差方向匹配的捷径。
+- `yaw_stuck_with_command.weight: -4.0 -> -2.0`
+  - 降低“不转就重罚”的压力，避免 policy 为逃避 stuck 继续选择贴地滑动。
+- `JK03FlatYawPPORunnerCfg.max_iterations: 3000 -> 5000`
+  - 对齐 flat/mature baseline 的默认训练长度，避免 Flat-Yaw 默认 3000 步左右过早停止。
+
+保留：
+
+- `track_ang_vel_z_exp.weight = 2.1`
+- `feet_gait.weight = 0.55`
+- `feet_slide.weight = -0.30`
+- `feet_air_time.weight = 0.35`
+- `yaw_feet_air_time_positive.weight = 0.75`
+
+### 没有修改什么
+
+- 未新增 reward 函数。
+- 未删除文件中的历史函数定义。
+- 未恢复前轮参与、防叠轮、切向摆动等实验性函数。
+- 未修改 `jk03.py`。
+- 未修改 JK03 URDF。
+- 未修改 terrain curriculum 算法。
+- 未修改 rough 任务主线。
+
+### 已知风险
+
+- 停掉轮差速捷径后，早期 X/Z yaw response 可能变慢，需要看 `error_vel_yaw` 是否短期变差。
+- 如果 `yaw_stuck_with_command` 降太低，policy 可能先变保守，需要至少看 1000-2000 step 的窗口均值。
+- 如果 `feet_slide` 不下降，说明贴地拖滑仍然比离地更便宜，下一步应调整滑动惩罚或接触/摩擦建模，而不是继续堆 reward 函数。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_wheel_differential_progress`、`yaw_wheel_velocity_alignment` 应缺失或为 0，属于预期。
+- `Episode_Reward/yaw_feet_air_time_positive` 是否继续上升。
+- `Episode_Reward/feet_air_time` 是否向 0 或转正。
+- `Episode_Reward/feet_slide` 是否下降。
+- `Metrics/base_velocity/error_vel_yaw` 是否只是短期变差，而不是持续崩。
+- 实测 X/Z 是否减少前轮支点、后轮贴地拖滑。
+
 ## 2026-06-25: flat-yaw-rebalance-short-lift-v33
 
 状态：不新增 reward 函数，在 v32 基础上重平衡短离地奖励和滑动惩罚。目标是解决 v32 出现的“有一点 `yaw_feet_air_time_positive`，但 `feet_air_time` 仍为负、实际仍贴地拖滑”的冲突。

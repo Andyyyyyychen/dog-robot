@@ -52,7 +52,7 @@ class JK03FlatYawPPORunnerCfg(JK03FlatPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 3000
+        self.max_iterations = 5000
         self.experiment_name = "jk03_flat_yaw"
         self.policy.init_noise_std = 0.28
         self.algorithm.entropy_coef = 0.002
