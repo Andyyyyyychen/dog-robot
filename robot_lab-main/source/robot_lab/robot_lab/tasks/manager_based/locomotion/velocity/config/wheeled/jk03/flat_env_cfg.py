@@ -195,19 +195,19 @@ class JK03FlatYawEnvCfg(JK03FlatEnvCfg):
             ".*_knee_joint": 0.30,
         }
 
-        self.rewards.feet_slide.weight = -0.24
+        self.rewards.feet_slide.weight = -0.30
         self.rewards.feet_slide.params["command_name"] = "base_velocity"
-        self.rewards.feet_slide.params["yaw_slide_scale"] = 1.3
+        self.rewards.feet_slide.params["yaw_slide_scale"] = 1.5
         self.rewards.feet_gait.weight = 0.55
         self.rewards.feet_gait.params["std"] = 0.55
         self.rewards.feet_gait.params["max_err"] = 0.35
         self.rewards.joint_deviation_hipx_l1.weight = -0.60
         self.rewards.joint_pos_penalty.weight = -0.24
         self.rewards.yaw_turn_joint_posture_l2.weight = -0.20
-        self.rewards.feet_air_time.weight = 0.55
-        self.rewards.feet_air_time.params["threshold"] = 0.12
+        self.rewards.feet_air_time.weight = 0.35
+        self.rewards.feet_air_time.params["threshold"] = 0.08
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.yaw_feet_air_time_positive.weight = 0.35
+        self.rewards.yaw_feet_air_time_positive.weight = 0.75
         self.rewards.yaw_feet_air_time_positive.params["threshold"] = 0.12
         self.rewards.yaw_feet_air_time_positive.params["command_threshold"] = 0.05
         self.rewards.yaw_feet_air_time_positive.params["max_xy_command"] = 0.12

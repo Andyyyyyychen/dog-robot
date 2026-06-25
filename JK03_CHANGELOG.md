@@ -29,6 +29,64 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-06-25: flat-yaw-rebalance-short-lift-v33
+
+状态：不新增 reward 函数，在 v32 基础上重平衡短离地奖励和滑动惩罚。目标是解决 v32 出现的“有一点 `yaw_feet_air_time_positive`，但 `feet_air_time` 仍为负、实际仍贴地拖滑”的冲突。
+
+### 为什么修改
+
+v32 最新 Flat-Yaw run 到约 `3100 step`：
+
+- `yaw_feet_air_time_positive` 约 `0.022`，说明 contact sensor 已经看到少量 1-2 个轮/脚短暂离地。
+- `feet_air_time` 仍在约 `-0.022`，说明这些短离地在落地结算时仍被旧 `feet_air_time` 判为不够长并扣分。
+- `feet_slide` 从约 `-0.253` 走到 `-0.260`，说明滑动仍没有被压住。
+- `yaw_command_progress` 继续改善，说明策略仍能靠贴地 pivot / 后轮拖滑拿到 yaw 进展。
+
+因此这次不再加函数，而是把信号方向调一致：早期短离地不要被旧项重罚，同时让贴地拖滑更不划算。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk03/flat_env_cfg.py`
+- `JK03_CHANGELOG.md`
+
+### 怎么修改
+
+仅修改 `JK03FlatYawEnvCfg` 参数：
+
+- `feet_air_time.weight: 0.55 -> 0.35`
+  - 降低旧 first-contact air-time 项对短离地的反向惩罚。
+- `feet_air_time.threshold: 0.12 -> 0.08`
+  - 允许早期较短的离地也更接近正反馈。
+- `yaw_feet_air_time_positive.weight: 0.35 -> 0.75`
+  - 强化 v32 新增的连续离地信号，让 policy 更明确知道 yaw 时应该尝试离地。
+- `feet_slide.weight: -0.24 -> -0.30`
+  - 适度加大贴地滑动惩罚。
+- `feet_slide.yaw_slide_scale: 1.3 -> 1.5`
+  - 只在 yaw 转向时进一步压制贴地拖滑。
+
+### 没有修改什么
+
+- 未新增任何 reward 函数。
+- 未恢复前轮参与、防叠轮、切向摆动等实验性函数。
+- 未修改 `jk03.py`。
+- 未修改 JK03 URDF。
+- 未修改 terrain curriculum 算法。
+- 未修改 rough 任务主线。
+
+### 已知风险
+
+- 如果 `yaw_feet_air_time_positive` 上升但 `feet_slide` 不下降，说明它在“轻微离地 + 继续滑”刷分。
+- 如果 `yaw error` 明显变差或 `yaw_stuck_with_command` 变差，说明滑动惩罚过强或离地奖励压过 yaw 跟踪。
+- 如果视频里只是抖脚而不是稳定换步，下一步应降低 `max_air_feet` 或调 gait，而不是继续加函数。
+
+### 下一步观察指标
+
+- `Episode_Reward/yaw_feet_air_time_positive` 是否明显上升。
+- `Episode_Reward/feet_air_time` 是否从负值向 0 或转正。
+- `Episode_Reward/feet_slide` 是否下降。
+- `Metrics/base_velocity/error_vel_yaw` 是否保持不崩。
+- 实测 X/Z 是否减少前轮支点、后轮拖滑。
+
 ## 2026-06-25: flat-yaw-positive-air-time-v32
 
 状态：根据 v31 约 1500 step 的窗口均值反馈，新增 1 个 reward 函数，不恢复多轮实验性前轮参与/防叠轮/切向摆动函数。目标是补上原 `feet_air_time` 只在落地瞬间给信号的问题，让 Flat-Yaw 在 yaw 命令下“离地期间”也能拿到连续奖励。
