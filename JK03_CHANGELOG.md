@@ -60,6 +60,7 @@ gymnasium.error.NameNotFound: Environment `RobotLab-Isaac-Velocity-Flat-Yaw-JK04
 - 新增 `JK04_CFG`，指向 JK04 URDF，初始高度设为 `0.56`。
 - 新增 `wheeled/jk04` 任务包，只注册第一阶段 `Flat-Yaw` 环境。
 - 复用现有 yaw reward 函数，首版采用“混合起步但偏踏步”的 Flat-Yaw 权重。
+- 为保证云端独立可运行，JK04 v1 不引用尚未提交到共享 MDP 的 `stair_lift_reward`、`yaw_in_place_xy_drift_penalty` 和 `yaw_inside_hind_step_participation`。
 - 新增 `jk04_flat_yaw` RSL-RL/CUSRL experiment 名称。
 - README 增加 JK04 `list_envs`、zero/random 和训练命令。
 

@@ -254,36 +254,6 @@ class JK04RewardsCfg(RewardsCfg):
         },
     )
 
-    stair_lift = RewTerm(
-        func=mdp.stair_lift_reward,
-        weight=12.0,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=["fl_wheel", "fr_wheel", "hl_wheel", "hr_wheel"],
-            ),
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=["fl_wheel_joint", "fr_wheel_joint", "hl_wheel_joint", "hr_wheel_joint"],
-            ),
-            "leg_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "fl_hipy_joint",
-                    "fl_knee_joint",
-                    "fr_hipy_joint",
-                    "fr_knee_joint",
-                    "hl_hipy_joint",
-                    "hl_knee_joint",
-                    "hr_hipy_joint",
-                    "hr_knee_joint",
-                ],
-            ),
-            "command_name": "base_velocity",
-            "robot_mass": 42.0,
-        },
-    )
-
 @configclass
 class JK04RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: JK04ActionsCfg = JK04ActionsCfg()
