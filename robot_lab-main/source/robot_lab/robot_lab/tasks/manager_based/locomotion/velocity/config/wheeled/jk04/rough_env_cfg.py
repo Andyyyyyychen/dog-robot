@@ -1,6 +1,8 @@
 # Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
+import torch
+
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
@@ -16,6 +18,42 @@ from robot_lab.tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 # Pre-defined configs
 ##
 from robot_lab.assets.jk04 import JK04_CFG  # isort: skip
+
+
+def yaw_front_rear_wheel_participation(
+    env,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    max_yaw_rate: float,
+    target_wheel_speed: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward in-place yaw only when front and rear wheels both participate."""
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_yaw = command[:, 2]
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_active = torch.logical_and(
+        torch.abs(command_yaw) > command_threshold,
+        command_xy_norm <= max_xy_command,
+    )
+
+    wheel_vel_abs = torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids])
+    front_speed = torch.mean(wheel_vel_abs[:, :2], dim=1)
+    rear_speed = torch.mean(wheel_vel_abs[:, 2:], dim=1)
+    front_score = torch.clamp(front_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    rear_score = torch.clamp(rear_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    balance_ratio = torch.minimum(front_speed, rear_speed) / (
+        torch.maximum(front_speed, rear_speed) + 1.0e-6
+    )
+
+    signed_yaw_rate = torch.sign(command_yaw) * asset.data.root_ang_vel_b[:, 2]
+    yaw_progress = torch.clamp(signed_yaw_rate / max(max_yaw_rate, 1.0e-6), min=0.0, max=1.0)
+    reward = torch.minimum(front_score, rear_score) * balance_ratio * yaw_progress
+    reward *= yaw_active.float()
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
 @configclass
@@ -91,6 +129,19 @@ class JK04RewardsCfg(RewardsCfg):
             "command_threshold": 0.08,
             "max_xy_command": 1.2,
             "target_wheel_diff": 5.0,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
+    yaw_front_rear_wheel_participation = RewTerm(
+        func=yaw_front_rear_wheel_participation,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.18,
+            "max_yaw_rate": 0.45,
+            "target_wheel_speed": 4.0,
             "asset_cfg": SceneEntityCfg("robot", joint_names=""),
         },
     )
