@@ -237,7 +237,59 @@ RSL-RL 一轮训练烟测：
 
 如果没有出现 `Traceback`，说明代码、环境注册、机器人生成和训练入口基本都通了。
 
-## 7. 短训练测试
+## 7. JK04 平地原地转向训练
+
+JK04 当前先接入平地原地转向专项任务：
+
+```text
+RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0
+```
+
+每次上传新代码后，先确认 JK04 环境已经注册：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/tools/list_envs.py --keyword JK04
+```
+
+必须能看到：
+
+```text
+RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0
+```
+
+然后先跑零动作和随机动作检查，不要直接长训：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/tools/zero_agent.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0 \
+  --headless \
+  --num_envs 16
+```
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/tools/random_agent.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0 \
+  --headless \
+  --num_envs 16
+```
+
+确认环境能创建后，再启动 RSL-RL 训练：
+
+```bash
+/root/IsaacLab/isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0 \
+  --headless \
+  --num_envs 256 \
+  --max_iterations 5000
+```
+
+训练结果会写到：
+
+```text
+robot_lab-main/logs/rsl_rl/jk04_flat_yaw/<run_time>/
+```
+
+## 8. 短训练测试
 
 先跑 100 次，不要一开始就长时间训练：
 
@@ -274,7 +326,7 @@ find logs/rsl_rl/jk03_rough -name "model_*.pt" | sort | tail
 logs/rsl_rl/jk03_rough/2026-06-09_11-05-00/model_99.pt
 ```
 
-## 8. 正式训练
+## 9. 正式训练
 
 Flat 平地训练：
 
@@ -310,7 +362,7 @@ robot_lab-main/logs/rsl_rl/jk03_rough/<run_time>/
 watch -n 2 nvidia-smi
 ```
 
-## 9. 训练卡住后继续训练
+## 10. 训练卡住后继续训练
 
 如果训练停在某个 iteration，比如 `2887`，不要立刻重开。先判断它是真的卡死，还是只是当前 iteration 比较慢。
 
@@ -427,7 +479,7 @@ tmux ls
 
 如果训练窗口里已经卡死，可以先用 `Ctrl + C` 停掉，再按上面的 `--resume` 命令从最新 checkpoint 继续。
 
-## 10. 播放训练后的模型
+## 11. 播放训练后的模型
 
 把 `<run_time>` 和 `<N>` 换成实际的 checkpoint 目录和模型编号。
 
@@ -533,7 +585,7 @@ ps -eo pid,etime,cmd | grep "rsl_rl/play.py" | grep -v grep
 
 这种情况下优先换一个更新的 checkpoint，例如 `model_5000.pt`、`model_6000.pt`，或者录视频分析动作。
 
-## 11. 在 Mac 上看云端训练结果
+## 12. 在 Mac 上看云端训练结果
 
 ### 方法 A：SSH 隧道看 TensorBoard
 
@@ -591,7 +643,7 @@ scp -P <SSH_PORT> -r <USER>@<SERVER_IP>:/root/dog-robot-main/robot_lab-main/logs
 open ~/Desktop/jk03_videos/play
 ```
 
-## 12. 常见问题
+## 13. 常见问题
 
 ### Isaac Sim 打开一下就没了
 
@@ -652,7 +704,7 @@ RobotLab-Isaac-Velocity-Flat-JK03-v0
 RobotLab-Isaac-Velocity-Rough-JK03-v0
 ```
 
-## 13. 更多文档
+## 14. 更多文档
 
 ```text
 robot_lab-main/docs/jk03_pretrain_checklist_cn.md

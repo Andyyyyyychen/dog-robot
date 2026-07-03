@@ -29,6 +29,59 @@
 - play/debug 工具。
 - README 和训练说明文档。
 
+## 2026-07-03: jk04-flat-yaw-entrypoint-v1
+
+状态：新增 JK04 平地原地转向训练入口，让云端能够注册并启动 `RobotLab-Isaac-Velocity-Flat-Yaw-JK04-v0`。这次只接入 JK04，不修改 JK03 受保护资产和 terrain curriculum。
+
+### 为什么修改
+
+云端运行 JK04 训练命令时报错：
+
+```text
+gymnasium.error.NameNotFound: Environment `RobotLab-Isaac-Velocity-Flat-Yaw-JK04` doesn't exist.
+```
+
+根因是仓库里只有 JK04 描述文件和设计文档，还没有 RobotLab 资产配置、Gym 环境注册和 PPO 配置。
+
+### 修改文件
+
+- `robot_lab-main/source/robot_lab/data/Robots/jk04/jk04_description/`
+- `robot_lab-main/source/robot_lab/robot_lab/assets/jk04.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk04/__init__.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk04/rough_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk04/flat_env_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk04/agents/rsl_rl_ppo_cfg.py`
+- `robot_lab-main/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/jk04/agents/cusrl_ppo_cfg.py`
+- `README.md`
+
+### 怎么修改
+
+- 将 `jk04_description` 复制到 RobotLab data 目录。
+- 新增 `JK04_CFG`，指向 JK04 URDF，初始高度设为 `0.56`。
+- 新增 `wheeled/jk04` 任务包，只注册第一阶段 `Flat-Yaw` 环境。
+- 复用现有 yaw reward 函数，首版采用“混合起步但偏踏步”的 Flat-Yaw 权重。
+- 新增 `jk04_flat_yaw` RSL-RL/CUSRL experiment 名称。
+- README 增加 JK04 `list_envs`、zero/random 和训练命令。
+
+### 没有修改什么
+
+- 未修改 `robot_lab-main/source/robot_lab/robot_lab/assets/jk03.py`。
+- 未修改 JK03 URDF。
+- 未修改 fan-ziqi 原始 terrain curriculum 算法。
+- 未修改 JK03 rough 任务的 terrain level 覆盖规则。
+
+### 验证结果
+
+- 本地 JK04 URDF/MJCF XML 解析通过。
+- 本地新增 Python 配置文件 `py_compile` 通过。
+- 云端仍需执行 `list_envs --keyword JK04`、`zero_agent` 和 `random_agent` 后才能开始长训。
+
+### 已知风险
+
+- `0.56` 初始高度是根据 JK04 MJCF 几何推导的首版值，需要通过 zero/random 检查确认。
+- JK04 惯量和关节动力学虽然接近 JK03，但首版 reward 权重仍可能需要训练后再调。
+- 如果训练早期出现纯轮差速磨地转向，需要进入第二阶段收紧奖励。
+
 ## 2026-06-25: flat-yaw-remove-dead-terms-v35
 
 状态：严格按公式走查 Flat-Yaw 后做无行为风险清理，不新增 reward 函数。目标是把 Flat-Yaw 下永远不生效或只适用于直线/XY 命令的项显式关掉，避免 TensorBoard 和 reward manager 继续混淆。
