@@ -99,6 +99,118 @@ def yaw_rear_only_front_wheel_penalty(
     return reward
 
 
+def yaw_in_place_xy_drift_penalty(
+    env,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    velocity_threshold: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize base xy drift during near-in-place yaw commands."""
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    yaw_turn_active = torch.logical_and(
+        torch.abs(command[:, 2]) > command_threshold,
+        torch.linalg.norm(command[:, :2], dim=1) <= max_xy_command,
+    )
+    xy_speed = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    reward = torch.clamp(xy_speed / max(velocity_threshold, 1.0e-6), min=0.0, max=1.0)
+    reward *= yaw_turn_active.float()
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def yaw_inside_hind_step_participation(
+    env,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    left_hind_body_name: str,
+    right_hind_body_name: str,
+    left_hind_joint_names: tuple[str, ...],
+    right_hind_joint_names: tuple[str, ...],
+    min_air_time: float,
+    threshold: float,
+    min_joint_motion: float,
+    target_joint_motion: float,
+    air_time_weight: float,
+    joint_motion_weight: float,
+    grounded_joint_scale: float,
+    command_threshold: float,
+    max_xy_command: float,
+    min_contact_feet: int,
+    max_air_feet: int,
+) -> torch.Tensor:
+    """Reward the inside hind leg for supported yaw participation without tiny twitches."""
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    yaw_command = command[:, 2]
+    yaw_active = torch.logical_and(
+        torch.abs(yaw_command) > command_threshold,
+        torch.linalg.norm(command[:, :2], dim=1) <= max_xy_command,
+    )
+
+    if not hasattr(env, "_jk04_yaw_inside_hind_step_cache"):
+        left_hind_body_id = contact_sensor.find_bodies(left_hind_body_name)[0][0]
+        right_hind_body_id = contact_sensor.find_bodies(right_hind_body_name)[0][0]
+        left_hind_joint_ids = asset.find_joints(left_hind_joint_names)[0]
+        right_hind_joint_ids = asset.find_joints(right_hind_joint_names)[0]
+        env._jk04_yaw_inside_hind_step_cache = (
+            left_hind_body_id,
+            right_hind_body_id,
+            left_hind_joint_ids,
+            right_hind_joint_ids,
+        )
+    left_hind_body_id, right_hind_body_id, left_hind_joint_ids, right_hind_joint_ids = (
+        env._jk04_yaw_inside_hind_step_cache
+    )
+
+    air_time = contact_sensor.data.current_air_time
+    contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    support_air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    support_air_count = torch.sum((support_air_time > 0.0).int(), dim=1)
+    support_contact_count = torch.sum((contact_time > 0.0).int(), dim=1)
+    supported = torch.logical_and(support_contact_count >= min_contact_feet, support_air_count <= max_air_feet)
+
+    left_turn = yaw_command > 0.0
+    inside_hind_air_time = torch.where(left_turn, air_time[:, left_hind_body_id], air_time[:, right_hind_body_id])
+    useful_inside_hind_air_time = torch.clamp(inside_hind_air_time - min_air_time, min=0.0)
+    useful_air_window = max(threshold - min_air_time, 1.0e-6)
+    air_time_score = torch.clamp(useful_inside_hind_air_time, max=useful_air_window) / useful_air_window
+
+    left_hind_joint_motion = torch.mean(
+        torch.abs(asset.data.joint_pos[:, left_hind_joint_ids] - asset.data.default_joint_pos[:, left_hind_joint_ids]),
+        dim=1,
+    )
+    right_hind_joint_motion = torch.mean(
+        torch.abs(
+            asset.data.joint_pos[:, right_hind_joint_ids] - asset.data.default_joint_pos[:, right_hind_joint_ids]
+        ),
+        dim=1,
+    )
+    inside_hind_joint_motion = torch.where(left_turn, left_hind_joint_motion, right_hind_joint_motion)
+    useful_joint_window = max(target_joint_motion - min_joint_motion, 1.0e-6)
+    joint_motion_score = torch.clamp(inside_hind_joint_motion - min_joint_motion, min=0.0, max=useful_joint_window)
+    joint_motion_score = joint_motion_score / useful_joint_window
+
+    inside_hind_airborne = inside_hind_air_time > min_air_time
+    grounded_joint_gate = torch.where(
+        inside_hind_airborne,
+        torch.ones_like(joint_motion_score),
+        grounded_joint_scale * torch.ones_like(joint_motion_score),
+    )
+
+    reward = torch.clamp(
+        air_time_weight * air_time_score + joint_motion_weight * joint_motion_score * grounded_joint_gate,
+        max=1.0,
+    )
+    reward *= torch.logical_and(yaw_active, supported).float()
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
 @configclass
 class JK04ActionsCfg(ActionsCfg):
     """Action specifications for the MDP."""
@@ -151,6 +263,18 @@ class JK04RewardsCfg(RewardsCfg):
         },
     )
 
+    yaw_in_place_xy_drift_penalty = RewTerm(
+        func=yaw_in_place_xy_drift_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.18,
+            "velocity_threshold": 0.35,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
     yaw_wheel_differential_progress = RewTerm(
         func=mdp.yaw_wheel_differential_progress,
         weight=0.0,
@@ -199,6 +323,31 @@ class JK04RewardsCfg(RewardsCfg):
             "front_min_wheel_speed": 1.2,
             "rear_target_wheel_speed": 3.0,
             "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
+    yaw_inside_hind_step_participation = RewTerm(
+        func=yaw_inside_hind_step_participation,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "threshold": 0.12,
+            "min_air_time": 0.03,
+            "min_joint_motion": 0.015,
+            "target_joint_motion": 0.08,
+            "air_time_weight": 0.45,
+            "joint_motion_weight": 0.55,
+            "grounded_joint_scale": 0.25,
+            "command_threshold": 0.05,
+            "max_xy_command": 0.12,
+            "min_contact_feet": 2,
+            "max_air_feet": 2,
+            "left_hind_body_name": "",
+            "right_hind_body_name": "",
+            "left_hind_joint_names": (),
+            "right_hind_joint_names": (),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
         },
     )
 

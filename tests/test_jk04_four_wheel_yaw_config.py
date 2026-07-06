@@ -118,12 +118,29 @@ class JK04FourWheelYawConfigTest(unittest.TestCase):
         )
 
     def test_flat_yaw_penalizes_in_place_xy_drift(self) -> None:
+        rough_text = source(ROUGH_CFG)
+        tree = ast.parse(rough_text)
+        function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        self.assertIn("yaw_in_place_xy_drift_penalty", function_names)
+        self.assertIn("yaw_in_place_xy_drift_penalty = RewTerm(", rough_text)
+        self.assertIn("func=yaw_in_place_xy_drift_penalty", rough_text)
+
         text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
         self.assertLess(assigned_number(text, "self.rewards.yaw_in_place_xy_drift_penalty.weight"), 0.0)
         self.assertIn(
             'self.rewards.yaw_in_place_xy_drift_penalty.params["velocity_threshold"] = 0.30',
             text,
         )
+
+    def test_flat_yaw_inside_hind_step_reward_is_local_to_jk04(self) -> None:
+        rough_text = source(ROUGH_CFG)
+        tree = ast.parse(rough_text)
+        function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        self.assertIn("yaw_inside_hind_step_participation", function_names)
+        self.assertIn("yaw_inside_hind_step_participation = RewTerm(", rough_text)
+        self.assertIn("func=yaw_inside_hind_step_participation", rough_text)
+        self.assertIn('"left_hind_body_name"', rough_text)
+        self.assertIn('"right_hind_body_name"', rough_text)
 
 
 if __name__ == "__main__":
