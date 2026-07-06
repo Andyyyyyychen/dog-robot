@@ -40,17 +40,60 @@ def yaw_front_rear_wheel_participation(
     )
 
     wheel_vel_abs = torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids])
-    front_speed = torch.mean(wheel_vel_abs[:, :2], dim=1)
-    rear_speed = torch.mean(wheel_vel_abs[:, 2:], dim=1)
-    front_score = torch.clamp(front_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
-    rear_score = torch.clamp(rear_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
-    balance_ratio = torch.minimum(front_speed, rear_speed) / (
-        torch.maximum(front_speed, rear_speed) + 1.0e-6
+    front_left_speed = wheel_vel_abs[:, 0]
+    front_right_speed = wheel_vel_abs[:, 1]
+    rear_left_speed = wheel_vel_abs[:, 2]
+    rear_right_speed = wheel_vel_abs[:, 3]
+    front_left_score = torch.clamp(front_left_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    front_right_score = torch.clamp(front_right_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    rear_left_score = torch.clamp(rear_left_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    rear_right_score = torch.clamp(rear_right_speed / max(target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+    front_score = torch.minimum(front_left_score, front_right_score)
+    rear_score = torch.minimum(rear_left_score, rear_right_score)
+    front_pair_speed = torch.minimum(front_left_speed, front_right_speed)
+    rear_pair_speed = torch.minimum(rear_left_speed, rear_right_speed)
+    balance_ratio = torch.minimum(front_pair_speed, rear_pair_speed) / (
+        torch.maximum(front_pair_speed, rear_pair_speed) + 1.0e-6
     )
 
     signed_yaw_rate = torch.sign(command_yaw) * asset.data.root_ang_vel_b[:, 2]
     yaw_progress = torch.clamp(signed_yaw_rate / max(max_yaw_rate, 1.0e-6), min=0.0, max=1.0)
     reward = torch.minimum(front_score, rear_score) * balance_ratio * yaw_progress
+    reward *= yaw_active.float()
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def yaw_rear_only_front_wheel_penalty(
+    env,
+    command_name: str,
+    command_threshold: float,
+    max_xy_command: float,
+    front_min_wheel_speed: float,
+    rear_target_wheel_speed: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize yaw turns where rear wheels spin while either front wheel is underused."""
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_yaw = command[:, 2]
+    command_xy_norm = torch.linalg.norm(command[:, :2], dim=1)
+    yaw_active = torch.logical_and(
+        torch.abs(command_yaw) > command_threshold,
+        command_xy_norm <= max_xy_command,
+    )
+
+    wheel_vel_abs = torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids])
+    front_pair_speed = torch.minimum(wheel_vel_abs[:, 0], wheel_vel_abs[:, 1])
+    rear_pair_speed = torch.mean(wheel_vel_abs[:, 2:], dim=1)
+    front_underuse = torch.clamp(
+        (front_min_wheel_speed - front_pair_speed) / max(front_min_wheel_speed, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    rear_activity = torch.clamp(rear_pair_speed / max(rear_target_wheel_speed, 1.0e-6), min=0.0, max=1.0)
+
+    reward = front_underuse * rear_activity
     reward *= yaw_active.float()
     reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
@@ -142,6 +185,19 @@ class JK04RewardsCfg(RewardsCfg):
             "max_xy_command": 0.18,
             "max_yaw_rate": 0.45,
             "target_wheel_speed": 4.0,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
+
+    yaw_rear_only_front_wheel_penalty = RewTerm(
+        func=yaw_rear_only_front_wheel_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "max_xy_command": 0.18,
+            "front_min_wheel_speed": 1.2,
+            "rear_target_wheel_speed": 3.0,
             "asset_cfg": SceneEntityCfg("robot", joint_names=""),
         },
     )

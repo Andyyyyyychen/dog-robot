@@ -45,6 +45,8 @@ class JK04FourWheelYawConfigTest(unittest.TestCase):
         self.assertIn("func=yaw_front_rear_wheel_participation", text)
         self.assertIn('"max_yaw_rate"', text)
         self.assertIn('"target_wheel_speed"', text)
+        self.assertIn("front_left_score", text)
+        self.assertIn("front_right_score", text)
 
     def test_flat_yaw_enables_wheel_participation_rewards(self) -> None:
         text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
@@ -63,6 +65,26 @@ class JK04FourWheelYawConfigTest(unittest.TestCase):
         self.assertLessEqual(
             assigned_number(text, "self.rewards.yaw_command_progress.weight"),
             0.25,
+        )
+
+    def test_flat_yaw_penalizes_rear_only_front_wheel_underuse(self) -> None:
+        rough_text = source(ROUGH_CFG)
+        tree = ast.parse(rough_text)
+        function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        self.assertIn("yaw_rear_only_front_wheel_penalty", function_names)
+        self.assertIn("yaw_rear_only_front_wheel_penalty = RewTerm(", rough_text)
+        self.assertIn("func=yaw_rear_only_front_wheel_penalty", rough_text)
+        self.assertIn('"front_min_wheel_speed"', rough_text)
+        self.assertIn('"rear_target_wheel_speed"', rough_text)
+
+        flat_yaw_text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
+        self.assertLess(
+            assigned_number(flat_yaw_text, "self.rewards.yaw_rear_only_front_wheel_penalty.weight"),
+            0.0,
+        )
+        self.assertIn(
+            'self.rewards.yaw_rear_only_front_wheel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names',
+            flat_yaw_text,
         )
 
     def test_flat_yaw_disables_step_based_yaw_shaping(self) -> None:
