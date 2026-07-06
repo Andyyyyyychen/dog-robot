@@ -87,11 +87,43 @@ class JK04FourWheelYawConfigTest(unittest.TestCase):
             flat_yaw_text,
         )
 
-    def test_flat_yaw_disables_step_based_yaw_shaping(self) -> None:
+    def test_flat_yaw_rebalances_wheel_rewards_for_stability(self) -> None:
         text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
-        self.assertEqual(assigned_number(text, "self.rewards.yaw_feet_air_time_positive.weight"), 0.0)
-        self.assertEqual(assigned_number(text, "self.rewards.feet_gait.weight"), 0.0)
-        self.assertEqual(assigned_number(text, "self.rewards.feet_air_time_variance.weight"), 0.0)
+        self.assertLessEqual(
+            assigned_number(text, "self.rewards.yaw_front_rear_wheel_participation.weight"),
+            1.10,
+        )
+        self.assertGreater(
+            assigned_number(text, "self.rewards.yaw_rear_only_front_wheel_penalty.weight"),
+            -1.25,
+        )
+        self.assertLessEqual(assigned_number(text, "self.rewards.lin_vel_z_l2.weight"), -0.85)
+        self.assertLessEqual(assigned_number(text, "self.rewards.ang_vel_xy_l2.weight"), -0.20)
+        self.assertLessEqual(assigned_number(text, "self.rewards.action_rate_l2.weight"), -0.012)
+        self.assertLess(assigned_number(text, "self.rewards.joint_acc_wheel_l2.weight"), 0.0)
+
+    def test_flat_yaw_enables_supported_step_shaping(self) -> None:
+        text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
+        self.assertGreater(assigned_number(text, "self.rewards.yaw_feet_air_time_positive.weight"), 0.0)
+        self.assertGreater(assigned_number(text, "self.rewards.feet_gait.weight"), 0.0)
+        self.assertLess(assigned_number(text, "self.rewards.feet_air_time_variance.weight"), 0.0)
+        self.assertGreater(assigned_number(text, "self.rewards.yaw_inside_hind_step_participation.weight"), 0.0)
+        self.assertIn(
+            'self.rewards.yaw_inside_hind_step_participation.params["left_hind_body_name"] = "hl_wheel"',
+            text,
+        )
+        self.assertIn(
+            'self.rewards.yaw_inside_hind_step_participation.params["right_hind_body_name"] = "hr_wheel"',
+            text,
+        )
+
+    def test_flat_yaw_penalizes_in_place_xy_drift(self) -> None:
+        text = class_source(source(FLAT_CFG), "JK04FlatYawEnvCfg")
+        self.assertLess(assigned_number(text, "self.rewards.yaw_in_place_xy_drift_penalty.weight"), 0.0)
+        self.assertIn(
+            'self.rewards.yaw_in_place_xy_drift_penalty.params["velocity_threshold"] = 0.30',
+            text,
+        )
 
 
 if __name__ == "__main__":
